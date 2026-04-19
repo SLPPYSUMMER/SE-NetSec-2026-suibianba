@@ -122,13 +122,13 @@
 
 | 页面编号 | 页面名称 | 英文名称 | 功能概述 | 原型链接 |
 |----------|----------|----------|----------|----------|
-| P01 | 登录页 | Login Page | 用户认证、品牌展示 | [原型图](UIPrototype\登录页.png) |
-| P02 | 系统首页/仪表盘 | Dashboard | 漏洞统计、修复趋势、最近任务 | [原型图](UIPrototype\系统首页.png) |
-| P03 | 漏洞管理列表 | Vulnerability List | 多维度筛选、快速搜索、批量操作 | [原型图](UIPrototype\漏洞列表页.png) |
-| P04 | 漏洞详情页 | Vulnerability Details | 漏洞信息、流转轨迹、评论协作 | [原型图](UIPrototype\漏洞详情页.png) |
-| P05 | 漏洞上报表单 | Vulnerability Report | 表单填写、附件上传 | [原型图](UIPrototype\漏洞上报页.png) |
-| P06 | 自动化扫描任务 | Scan Tasks | 扫描管理、结果导入 | [原型图](UIPrototype\自动化扫描管理.png) |
-| P07 | 设置与报告生成 | Reports Export | 报告配置、权限设置 | [原型图](UIPrototype\系统设置页.png) |
+| P01 | 登录页 | Login Page | 用户认证、品牌展示 | [原型图](..\..\UIPrototype\登录页.png) |
+| P02 | 系统首页/仪表盘 | Dashboard | 漏洞统计、修复趋势、最近任务 | [原型图](..\..\UIPrototype\系统首页.png) |
+| P03 | 漏洞管理列表 | Vulnerability List | 多维度筛选、快速搜索、批量操作 | [原型图](..\..\UIPrototype\漏洞列表页.png) |
+| P04 | 漏洞详情页 | Vulnerability Details | 漏洞信息、流转轨迹、评论协作 | [原型图](..\..\UIPrototype\漏洞详情页.png) |
+| P05 | 漏洞上报表单 | Vulnerability Report | 表单填写、附件上传 | [原型图](..\..\UIPrototype\漏洞上报页.png) |
+| P06 | 自动化扫描任务 | Scan Tasks | 扫描管理、结果导入 | [原型图](..\..\UIPrototype\自动化扫描管理.png) |
+| P07 | 设置与报告生成 | Reports Export | 报告配置、权限设置 | [原型图](..\..\UIPrototype\系统设置页.png) |
 
 ---
 
