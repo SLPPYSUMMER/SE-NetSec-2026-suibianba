@@ -26,5 +26,11 @@
 - [ ] 开发实现
 - [ ] 测试部署
 
+## 文档索引
+- [开发注意事项](docs/plan/开发注意事项.md)
+- [团队计划](docs/plan/团队计划.md)
+- [需求分析报告](docs/requirements/需求分析报告.md)
+- [人机协作记录](docs/requirements/人机协作记录.md)
+
 ## 仓库地址
 https://github.com/SLPPYSUMMER/SE-NetSec-2026-suibianba
