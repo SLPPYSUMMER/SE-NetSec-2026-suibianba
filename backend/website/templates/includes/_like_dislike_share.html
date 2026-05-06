@@ -1,0 +1,263 @@
+{% load gravatar %}
+{% load custom_tags %}
+<!-- Modern redesigned like/dislike/share component -->
+<div class="flex flex-wrap gap-x-3 w-full items-center border-y border-gray-300 dark:border-gray-600 py-6 my-3">
+    <!-- HTMX fragment for like/dislike/flag that updates dynamically -->
+    <div id="vote-section-{{ object.id }}">
+        {% include "includes/_like_section.html" with object=object positive_votes=positive_votes negative_votes=negative_votes flags_count=flags_count user_vote=user_vote user_has_flagged=user_has_flagged %}
+    </div>
+    <!-- Share button (static) -->
+    <button onclick="copyBugToClipboard('{{ object.domain_title|escapejs }}', '{{ object.description|escapejs }}', '{{ object.id }}')"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <i class="fa-solid fa-share-nodes text-gray-400"></i>
+        <span class="font-semibold">Share</span>
+    </button>
+    <!-- View buttons section -->
+    <div class="flex items-center gap-4">
+        <!-- View Flags button -->
+        {% if flagers %}
+            <button onclick="openFlagModal('{{ object.id }}')"
+                    class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">
+                <i class="fa-regular fa-flag"></i> View Flags ({{ flagers|length }})
+            </button>
+        {% endif %}
+        <!-- View Likes button -->
+        {% if likers %}
+            <button onclick="openLikeModal('{{ object.id }}')"
+                    class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">
+                <i class="fa-regular fa-thumbs-up"></i> View Likes ({{ likers|length }})
+            </button>
+        {% endif %}
+    </div>
+    <!-- Bookmark section that updates via HTMX -->
+    <div id="bookmark-section-{{ object.id }}">
+        {% include "includes/_bookmark_section.html" with object=object user_has_saved=user_has_saved|default:False %}
+    </div>
+</div>
+<!-- Modals -->
+{% include "includes/_like_modal.html" with modal_id="like-modal-"|add:object.id|stringformat:"s" likers=likers %}
+{% include "includes/_flag_modal.html" with modal_id="flag-modal-"|add:object.id|stringformat:"s" flagers=flagers %}
+<script>
+    // CSRF token utility function
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // Copy bug details to clipboard
+    function copyBugToClipboard(domain, description, issueId) {
+        const fqdn = '{% env "FQDN" %}';
+        const textToCopy = `Bug Found on ${domain} - ${description} Report: https://${fqdn}/issue/${issueId}`;
+        
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(textToCopy)
+                .then(() => {
+                    showNotification("Bug details copied to clipboard!", "success");
+                })
+                .catch((err) => {
+                    console.error("Failed to copy:", err);
+                    fallbackCopy(textToCopy);
+                });
+        } else {
+            fallbackCopy(textToCopy);
+        }
+    }
+    
+    // Fallback copy method for older browsers
+    function fallbackCopy(text) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+                showNotification("Bug details copied to clipboard!", "success");
+            } else {
+                showNotification("Failed to copy. Please copy manually.", "error");
+            }
+        } catch (err) {
+            console.error("Fallback copy error:", err);
+            showNotification("Failed to copy. Please copy manually.", "error");
+        }
+        
+        document.body.removeChild(textArea);
+    }
+    
+    // Show notification
+    function showNotification(message, type) {
+        if (typeof $.notify === 'function') {
+            $.notify(message, {
+                style: "custom",
+                className: type === "success" ? "success" : "danger"
+            });
+        } else if (window.createMessage) {
+            window.createMessage(message, type, 3000);
+        } else {
+            alert(message);
+        }
+    }
+
+    // Modal functions
+    function openLikeModal(issueId) {
+        const modal = document.getElementById(`like-modal-${issueId}`);
+        if (modal) {
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+    }
+    
+    function closeLikeModal(issueId) {
+        const modal = document.getElementById(`like-modal-${issueId}`);
+        if (modal) {
+            modal.classList.add('hidden');
+        }
+        document.body.style.overflow = 'auto';
+    }
+    
+    function openFlagModal(issueId) {
+        const modal = document.getElementById(`flag-modal-${issueId}`);
+        if (modal) {
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+    }
+    
+    function closeFlagModal(issueId) {
+        const modal = document.getElementById(`flag-modal-${issueId}`);
+        if (modal) {
+            modal.classList.add('hidden');
+        }
+        document.body.style.overflow = 'auto';
+    }
+
+    // Resolve issue
+    async function resolveIssue(id) {
+        try {
+            const response = await fetch(`/resolve/${id}/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin'
+            });
+            
+            if (response.status === 403) {
+                showNotification("Permission Denied", "error");
+            } else if (response.ok) {
+                window.location.reload();
+            } else {
+                showNotification("Error resolving issue", "error");
+            }
+        } catch (error) {
+            console.error('Resolve error:', error);
+            showNotification("Error resolving issue", "error");
+        }
+    }
+
+    // Create GitHub issue
+    function createGitHubIssue(issueId) {
+        fetch(`/create_github_issue/${issueId}/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'Content-Type': 'application/json'
+            },
+            credentials: 'same-origin'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === "ok") {
+                showNotification("GitHub issue created successfully!", "success");
+                if (data.github_url) {
+                    window.open(data.github_url, '_blank');
+                }
+            } else {
+                showNotification(data.status_reason || "Failed to create GitHub issue", "error");
+            }
+        })
+        .catch(error => {
+            console.error('GitHub issue error:', error);
+            showNotification("Error creating GitHub issue", "error");
+        });
+    }
+
+    // Subscribe to domain
+    function subscribeToDomain(domainId) {
+        fetch(`/domain/${domainId}/subscribe/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'Content-Type': 'application/json'
+            },
+            credentials: 'same-origin'
+        })
+        .then(response => {
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                showNotification("Error subscribing to domain", "error");
+            }
+        })
+        .catch(error => {
+            console.error('Subscribe error:', error);
+            showNotification("Error subscribing to domain", "error");
+        });
+    }
+
+    // Initialize event listeners once
+    document.addEventListener('DOMContentLoaded', function() {
+        // Modal close on outside click
+        document.addEventListener('click', function(event) {
+            // Like modals
+            document.querySelectorAll('[id^="like-modal-"]:not(.hidden)').forEach(modal => {
+                if (event.target === modal) {
+                    const issueId = modal.id.replace('like-modal-', '');
+                    closeLikeModal(issueId);
+                }
+            });
+            
+            // Flag modals
+            document.querySelectorAll('[id^="flag-modal-"]:not(.hidden)').forEach(modal => {
+                if (event.target === modal) {
+                    const issueId = modal.id.replace('flag-modal-', '');
+                    closeFlagModal(issueId);
+                }
+            });
+        });
+        
+        // Escape key to close modals
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                document.querySelectorAll('[id^="like-modal-"]:not(.hidden), [id^="flag-modal-"]:not(.hidden)').forEach(modal => {
+                    modal.classList.add('hidden');
+                });
+                document.body.style.overflow = 'auto';
+            }
+        });
+        
+        // Initialize HTMX if available
+        if (window.htmx) {
+            htmx.on("htmx:afterSwap", function(evt) {
+                // Re-attach any necessary event handlers
+                console.log("HTMX swap completed", evt.detail);
+            });
+        }
+    });
+</script>

@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}
+    Global Leaderboard
+{% endblock title %}
+{% block description %}
+    Check out the top performers on the global leaderboard. View scores, usernames, and their achievements from around the world.
+{% endblock description %}
+{% block keywords %}
+    Global Leaderboard, Top Performers, Scores, Usernames, Achievements, Worldwide Rankings
+{% endblock keywords %}
+{% block og_title %}
+    Global Leaderboard - Top Performers and Achievements Worldwide
+{% endblock og_title %}
+{% block og_description %}
+    Explore the global leaderboard to see the top performers from around the world. View scores, usernames, and their achievements.
+{% endblock og_description %}
+{% load gravatar %}
+{% block content %}
+    {% include "includes/sidenav.html" %}
+    <div class="row container-min-height flex justify-center pb-4">
+        <div class="col-lg-12 flex justify-center items-center">
+            <h1 class="page-header">Global Leaderboard</h1>
+        </div>
+    </div>
+    <div class="flex flex-col md:gap-10 px-4 gap-2 md:px-0">
+        <div class="flex justify-center gap-6 flex-wrap">
+            <div class="flex-1 border-2 border-[#e74c3c] pb-3 rounded-lg flex-1 min-w-[300px] max-w-[550px]">
+                <div class="text-center text-3xl font-bold py-4 border-b-2 border-[#e74c3c] rounded-t-lg">Points Leaderboard</div>
+                <div class="list-group w-full p-4">
+                    {% if not leaderboard %}
+                        <p class="text-[#e74c3c] text-center font-medium">No data for this month!</p>
+                    {% else %}
+                        <div class="flex flex-col gap-2">
+                            {% for leader in leaderboard %}
+                                <div class="flex justify-between items-center">
+                                    <div class="flex gap-2 items-center truncate">
+                                        {% if leader.userprofile.avatar %}
+                                            <img src="{{ leader.userprofile.avatar }}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ leader.username }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% elif leader.socialaccount_set.all.0.get_avatar_url %}
+                                            <img src="{{ leader.socialaccount_set.all.0.get_avatar_url }}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="username"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% else %}
+                                            <img src="{% gravatar_url leader.email 50 %}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="username"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% endif %}
+                                        {% if leader.username %}
+                                            <a href="{% url 'profile' slug=leader.username %}"
+                                               class="text-lg transition-all duration-200">{{ leader.username }}</a>
+                                        {% else %}
+                                            <span class="text-lg transition-all duration-200">{{ leader.username|default:"Unknown" }}</span>
+                                        {% endif %}
+                                        <span>
+                                            <kbd class="py-1 px-2 select-none rounded-md {% if leader.userprofile.get_title_display|lower == 'silver' %}bg-gray-400 text-gray-800{% elif leader.userprofile.get_title_display|lower == 'gold' %}bg-yellow-600 text-gray-800{% elif leader.userprofile.get_title_display|lower == 'bronze' %}bg-orange-700 text-white{% elif leader.userprofile.get_title_display|lower == 'platinum' %}bg-gray-200 text-gray-800{% elif leader.userprofile.get_title_display|lower == 'unrated' %}bg-black text-white{% endif %}">
+                                                {{ leader.userprofile.get_title_display }}
+                                            </kbd>
+                                        </span>
+                                        {% if leader.userprofile.winnings %}
+                                            <span class="pull-right badge px-2 py-1 select-none">${{ leader.userprofile.winnings|default:""|floatformat }}</span>
+                                        {% endif %}
+                                    </div>
+                                    <span class="pull-right badge bg-gray-100 dark:bg-gray-800 flex-shrink-0 rounded-md py-1 px-2 select-none">{{ leader.total_score }} Points</span>
+                                </div>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex-1 border-2 border-[#e74c3c] pb-3 rounded-lg flex-1 min-w-[300px] max-w-[550px]">
+                <div class="text-center text-3xl font-bold py-4 border-b-2 border-[#e74c3c] rounded-t-lg">
+                    Pull Request Leaderboard
+                    <div class="text-sm font-normal text-gray-600 dark:text-gray-400 mt-1">Last 6 months</div>
+                </div>
+                <div class="list-group w-full p-4">
+                    {% if pr_leaderboard %}
+                        <div class="flex flex-col gap-2">
+                            {% for leader in pr_leaderboard %}
+                                <div class="flex justify-between items-center">
+                                    <div class="flex gap-2 items-center truncate">
+                                        {% if leader.contributor__avatar_url %}
+                                            <img src="{{ leader.contributor__avatar_url }}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ leader.contributor__name }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% else %}
+                                            <img src="{% gravatar_url 'default@example.com' 50 %}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ leader.contributor__name|default:'Unknown User' }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% endif %}
+                                        {% if leader.user_profile__user__username %}
+                                            <a href="{% url 'profile' slug=leader.user_profile__user__username %}"
+                                               class="text-lg transition-all duration-200">{{ leader.user_profile__user__username }}</a>
+                                        {% else %}
+                                            <span class="text-lg text-gray-500 dark:text-gray-500">{{ leader.contributor__name|default:"Unknown User" }}</span>
+                                        {% endif %}
+                                        {% if leader.contributor__github_url %}
+                                            <a href="{{ leader.contributor__github_url }}"
+                                               target="_blank"
+                                               class="ml-2">
+                                                <i class="fab fa-github text-xl"></i>
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                    <span class="pull-right badge bg-gray-100 dark:bg-gray-800 flex-shrink-0 rounded-md py-1 px-2 select-none">{{ leader.total_prs }} PRs</span>
+                                </div>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-[#e74c3c] text-center font-medium">No pull request data available!</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex-1 border-2 border-[#e74c3c] pb-3 rounded-lg flex-1 min-w-[300px] max-w-[550px]">
+                <div class="text-center text-3xl font-bold py-4 border-b-2 border-[#e74c3c] rounded-t-lg">
+                    Code Review Leaderboard
+                    <div class="text-sm font-normal text-gray-600 dark:text-gray-400 mt-1">Last 6 months</div>
+                </div>
+                <div class="list-group p-4">
+                    {% if code_review_leaderboard %}
+                        <div class="flex flex-col gap-2">
+                            {% for leader in code_review_leaderboard %}
+                                <div class="flex justify-between items-center">
+                                    <div class="flex gap-2 items-center truncate">
+                                        {% if leader.reviewer_contributor__avatar_url %}
+                                            <img src="{{ leader.reviewer_contributor__avatar_url }}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ leader.reviewer_contributor__name }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% else %}
+                                            <img src="{% gravatar_url 'default@example.com' 50 %}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ leader.reviewer_contributor__name|default:'Unknown User' }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% endif %}
+                                        {% if leader.reviewer__user__username %}
+                                            <a href="{% url 'profile' slug=leader.reviewer__user__username %}"
+                                               class="text-lg transition-all duration-200">
+                                                {{ leader.reviewer__user__username }}
+                                            </a>
+                                        {% else %}
+                                            <span class="text-lg text-gray-500 dark:text-gray-500">{{ leader.reviewer_contributor__name|default:"Unknown User" }}</span>
+                                        {% endif %}
+                                        {% if leader.reviewer_contributor__github_url %}
+                                            <a href="{{ leader.reviewer_contributor__github_url }}"
+                                               target="_blank"
+                                               class="ml-2">
+                                                <i class="fab fa-github text-xl"></i>
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                    <span class="pull-right badge bg-gray-100 dark:bg-gray-800 flex-shrink-0 rounded-md py-1 px-2 select-none">Reviews: {{ leader.total_reviews }}</span>
+                                </div>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-[#e74c3c] text-center font-medium">No code review data available!</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="flex justify-center gap-6 flex-wrap">
+            <div class="flex-1 border-2 border-[#e74c3c] pb-3 rounded-lg flex-1 min-w-[300px] max-w-[550px]">
+                <div class="text-center text-3xl font-bold py-4 border-b-2 border-[#e74c3c] rounded-t-lg">
+                    Comment Leaderboard
+                    <div class="text-sm font-normal text-gray-600 dark:text-gray-400 mt-1">Last 6 months</div>
+                </div>
+                <div class="list-group p-4">
+                    {% if comment_leaderboard %}
+                        <div class="flex flex-col gap-2">
+                            {% for leader in comment_leaderboard %}
+                                <div class="flex justify-between items-center">
+                                    <div class="flex gap-2 items-center truncate">
+                                        {% if leader.commenter_contributor__avatar_url %}
+                                            <img src="{{ leader.commenter_contributor__avatar_url }}"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ leader.commenter_contributor__name }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% else %}
+                                            <img src="{% gravatar_url 'default@example.com' 50 %}"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ leader.commenter_contributor__name|default:'Unknown User' }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% endif %}
+                                        {% if leader.commenter__user__username %}
+                                            <a href="{% url 'profile' slug=leader.commenter__user__username %}"
+                                               class="text-lg transition-all duration-200">
+                                                {{ leader.commenter__user__username }}
+                                            </a>
+                                        {% else %}
+                                            <span class="text-lg text-gray-500 dark:text-gray-500">{{ leader.commenter_contributor__name|default:"Unknown User" }}</span>
+                                        {% endif %}
+                                        {% if leader.commenter_contributor__github_url %}
+                                            <a href="{{ leader.commenter_contributor__github_url }}"
+                                               target="_blank"
+                                               class="ml-2">
+                                                <i class="fab fa-github text-xl"></i>
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                    <span class="pull-right badge bg-gray-100 dark:bg-gray-800 flex-shrink-0 rounded-md py-1 px-2 select-none">{{ leader.total_comments }} Comments</span>
+                                </div>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-[#e74c3c] text-center font-medium">No comment data available!</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex-1 border-2 border-[#e74c3c] pb-3 rounded-lg flex-1 min-w-[300px] max-w-[550px]">
+                <div class="text-center text-3xl font-bold py-4 border-b-2 border-[#e74c3c] rounded-t-lg">Top Visitors</div>
+                <div class="list-group w-full p-4">
+                    {% if top_visitors %}
+                        <div class="flex flex-col gap-2">
+                            {% for profile in top_visitors %}
+                                <div class="flex justify-between items-center">
+                                    <div class="flex gap-2 items-center truncate">
+                                        {% if profile.avatar %}
+                                            <img src="{{ profile.avatar }}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full rounded-full"
+                                                 alt="{{ profile.user.username }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% else %}
+                                            <img src="{% gravatar_url profile.user.email 50 %}"
+                                                 loading="lazy"
+                                                 class="size-11 select-none border border-gray-200 dark:border-gray-700 rounded-full"
+                                                 alt="{{ profile.user.username }}"
+                                                 width="50px"
+                                                 height="50px">
+                                        {% endif %}
+                                        <a href="{% url 'profile' profile.user.username %}"
+                                           class="text-lg transition-all duration-200">{{ profile.user.username }}</a>
+                                    </div>
+                                    <div class="flex flex-col items-end text-right text-sm">
+                                        <span class="badge bg-gray-100 dark:bg-gray-800 rounded-md py-1 px-2 select-none">{{ profile.daily_visit_count }} visits</span>
+                                        <span class="text-xs text-gray-500 dark:text-gray-500">Last Visit: {{ profile.last_visit_day|default:"Never" }}</span>
+                                    </div>
+                                </div>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-[#e74c3c] text-center font-medium">No visitor data available!</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex-1 border-2 border-[#e74c3c] pb-3 rounded-lg flex-1 min-w-[300px] max-w-[550px]">
+                <div class="text-center text-3xl font-bold py-4 border-b-2 border-[#e74c3c] rounded-t-lg">Issue Bounties</div>
+                <div class="list-group w-full p-4">
+                    {% if not issue_bounties %}
+                        <p class="text-[#e74c3c] text-center font-medium">No issue bounties data available!</p>
+                    {% else %}
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex-1 border-2 border-[#e74c3c] pb-3 rounded-lg flex-1 min-w-[300px] max-w-[550px]">
+                <div class="text-center text-3xl font-bold py-4 border-b-2 border-[#e74c3c] rounded-t-lg">Bug Bounties</div>
+                <div class="list-group w-full p-4">
+                    {% if not bug_bounties %}
+                        <p class="text-[#e74c3c] text-center font-medium">No bug bounties data available!</p>
+                    {% else %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

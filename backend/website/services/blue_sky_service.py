@@ -1,0 +1,57 @@
+# services/bluesky_service.py
+import logging
+
+from atproto import Client, models
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+
+class BlueSkyService:
+    def __init__(self):
+        self.client = Client()
+        # Only attempt login if credentials are configured
+        if settings.BLUESKY_USERNAME and settings.BLUESKY_PASSWORD:
+            try:
+                self.client.login(settings.BLUESKY_USERNAME, settings.BLUESKY_PASSWORD)
+            except Exception:
+                logger.exception("Failed to login to BlueSky")
+        else:
+            logger.debug("BlueSky credentials not configured")
+
+    def post_text(self, text):
+        """Post plain text to BlueSky."""
+        post = self.client.send_post(text=text)
+        return post.uri  # Assuming the response includes a post ID
+
+    def post_with_image(self, text, image_path):
+        """Post text with an image to BlueSky."""
+        try:
+            # Read the image as binary
+            with open(image_path, "rb") as img_file:
+                img_data = img_file.read()
+
+            # Debug: Confirm image data size, not raw binary
+            logger.debug(f"Uploading image to BlueSky... Size: {len(img_data)} bytes")
+
+            # Upload the image to BlueSky
+            upload = self.client.upload_blob(img_data)
+            logger.debug(f"Upload response: Blob ID = {upload.blob}")
+
+            # Create the embedded image structure
+            images = [models.AppBskyEmbedImages.Image(alt="Activity Image", image=upload.blob)]
+            embed = models.AppBskyEmbedImages.Main(images=images)
+            logger.debug(f"Embed object: {embed}")
+
+            # Create the post record
+            post_record = models.AppBskyFeedPost.Record(
+                text=text, embed=embed, created_at=self.client.get_current_time_iso()
+            )
+
+            # Post to BlueSky
+            post = self.client.app.bsky.feed.post.create(self.client.me.did, post_record)
+            logger.info(f"Post created successfully. URI: {post.uri}")
+            return post.uri
+        except Exception as e:
+            logger.error(f"Error in post_with_image: {e}")
+            raise

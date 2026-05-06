@@ -1,0 +1,40 @@
+﻿services:
+  db:
+    image: postgres:17.6
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=blt_db
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "blt_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    container_name: secguard-postgres-db
+    restart: always
+
+  app:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    container_name: secguard-app
+    restart: on-failure
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/blt
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
+      - POSTGRES_PASSWORD=postgres
+    command: poetry run python manage.py runserver 0.0.0.0:8000
+    tty: true
+
+volumes:
+  postgres_db:

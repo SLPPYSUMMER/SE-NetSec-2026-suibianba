@@ -1,0 +1,1121 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load static %}
+{% load custom_tags %}
+{% block title %}
+    Report an issue | OWASP {% env 'PROJECT_NAME' %}
+{% endblock title %}
+{% block description %}
+    Report a bug by providing the domain URL, bug title, and type. Attach screenshots and categorize the bug to ensure comprehensive reporting.
+{% endblock description %}
+{% block keywords %}
+    Report a Bug, Bug Reporting, Domain URL, Bug Title, Bug Type, Attach Screenshots, Categorize Bug
+{% endblock keywords %}
+{% block og_title %}
+    Report a Bug - Comprehensive Reporting
+{% endblock og_title %}
+{% block og_description %}
+    Report a bug efficiently by providing all necessary details such as domain URL, bug title, type, and screenshots. Categorize the bug for better tracking.
+{% endblock og_description %}
+{% load gravatar %}
+{% load socialaccount %}
+{% load humanize %}
+{% providers_media_js %}
+{% block content %}
+    {% include "includes/sidenav.html" %}
+    <div id="duplicate-container"
+         class="fixed w-full h-full top-0 left-0 overflow-y-auto z-[10000] bg-black/80 backdrop-blur-sm"
+         hidden>
+        <div class="flex flex-col w-full h-full items-center">
+            <div class="flex bg-red-500 mx-4 lg:mx-0 rounded-xl flex-col justify-center items-center mt-10 w-full lg:max-w-[1400px]">
+                <div class="w-full flex bg-red-500 rounded-t-lg select-none items-center justify-between py-1 px-4">
+                    <h1 class="text-center text-white font-bold text-2xl p-4 w-full">{% trans "DUPLICATE ISSUES" %}</h1>
+                    <button id="close-duplicate-container"
+                            class="flex w-10 h-10 bg-white dark:bg-gray-800 justify-center items-center rounded-full hover:bg-red-100 hover:shadow-md transition-all duration-200">
+                        <i class="text-red-500 scale-150 fa-sharp fa-solid fa-xmark cursor-pointer"></i>
+                    </button>
+                </div>
+                <div class="p-6 w-full bg-white dark:bg-gray-800 rounded-b-lg shadow-lg border border-gray-200 dark:border-gray-700">
+                    <div class="flex justify-between items-center mb-6 select-none">
+                        <h3 class="text-2xl font-bold text-red-500">{% trans "Latest Issues" %}</h3>
+                        <a href=""
+                           id="view_all"
+                           class="text-lg font-medium text-blue-600 hover:underline hover:text-blue-500">View all</a>
+                    </div>
+                    <div class="flow-root">
+                        <ul role="list"
+                            id="duplicate-list"
+                            class="divide-y divide-gray-200 dark:divide-gray-700 max-h-[60vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                        </ul>
+                    </div>
+                    <div class="pt-6 border-t border-gray-300 dark:border-gray-600 text-center">
+                        <button onclick="$('#duplicate-container').hide()"
+                                class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors duration-200 font-medium">
+                            Close List
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
+        <div class="w-[90%] mx-auto">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 md:px-8 py-8 mb-8">
+                <!-- BACON Reward Section -->
+                <div class="mb-6 p-4 bg-[#e74c3c]/10 rounded-lg">
+                    <div class="flex items-center gap-3">
+                        <i class="fas fa-bacon text-[#e74c3c] text-xl"></i>
+                        <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-200">BACON Token Rewards</h2>
+                    </div>
+                    <p class="mt-2 text-gray-600 dark:text-gray-400">
+                        Earn 5 BACON tokens for reporting a valid bug! Extra 3 tokens for security-related issues.
+                    </p>
+                </div>
+                <!-- Main Header -->
+                <div class="flex items-center gap-6">
+                    <div class="size-16 bg-gradient-to-r from-[#e74c3c] to-[#c0392b] rounded-full flex items-center justify-center">
+                        <i class="fas fa-bug text-2xl text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-200">{% trans "REPORT A BUG" %}</h1>
+                        <p class="text-gray-600 dark:text-gray-400 mt-2">Help improve security by reporting vulnerabilities</p>
+                    </div>
+                </div>
+            </div>
+            <form id="createIssueForm"
+                  method="post"
+                  action="#"
+                  enctype="multipart/form-data"
+                  onsubmit="return validateCVE()">
+                {% csrf_token %}
+                <!-- Duplicate Warning Section -->
+                {% if show_duplicate_warning and similar_bugs %}
+                    <div class="mb-6 bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-6 rounded-lg">
+                        <div class="flex items-start">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-exclamation-triangle text-yellow-400 text-2xl"></i>
+                            </div>
+                            <div class="ml-4 flex-1">
+                                <h3 class="text-lg font-semibold text-yellow-800 dark:text-yellow-200">
+                                    ⚠️ Similar Bugs Found ({{ duplicate_confidence }} confidence)
+                                </h3>
+                                <p class="mt-2 text-sm text-yellow-700 dark:text-yellow-300">
+                                    We found {{ similar_bugs|length }} similar bug report(s). Please review them to avoid duplicates.
+                                </p>
+                                <div class="mt-4 space-y-3">
+                                    {% for bug in similar_bugs %}
+                                        <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-yellow-200 dark:border-yellow-700">
+                                            <div class="flex items-start justify-between">
+                                                <div class="flex-1">
+                                                    <div class="flex items-center gap-2 mb-2">
+                                                        <a href="/issue/{{ bug.id }}/"
+                                                           target="_blank"
+                                                           class="text-blue-600 hover:text-blue-800 font-semibold">
+                                                            Bug #{{ bug.id }}
+                                                        </a>
+                                                        <span class="px-2 py-1 text-xs font-semibold rounded-full {% if bug.similarity_percent >= 70 %}bg-red-100 text-red-800{% elif bug.similarity_percent >= 60 %}bg-orange-100 text-orange-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+                                                            {{ bug.similarity_percent }}% match
+                                                        </span>
+                                                        <span class="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                                                            {{ bug.status }}
+                                                        </span>
+                                                    </div>
+                                                    <p class="text-sm text-gray-700 dark:text-gray-300 mb-2">{{ bug.description }}</p>
+                                                    <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                                                        <span><i class="fas fa-user mr-1"></i>{{ bug.user }}</span>
+                                                        <span><i class="fas fa-calendar mr-1"></i>{{ bug.created }}</span>
+                                                        <span><i class="fas fa-link mr-1"></i>{{ bug.url|truncatechars:40 }}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                                <div class="mt-4 flex items-center gap-4">
+                                    <input type="checkbox"
+                                           name="confirm_not_duplicate"
+                                           id="confirm_not_duplicate"
+                                           class="w-5 h-5 text-red-600 border-gray-300 rounded focus:ring-red-500">
+                                    <label for="confirm_not_duplicate"
+                                           class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                                        I confirm this is NOT a duplicate and want to proceed with submission
+                                    </label>
+                                </div>
+                                <div class="mt-4 text-sm text-yellow-700 dark:text-yellow-300">
+                                    <i class="fas fa-info-circle mr-1"></i>
+                                    If your bug is different, please check the box above and submit. Otherwise, consider commenting on an existing bug.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <label for="url"
+                                           class="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                                        {% trans "Domain URL" %}
+                                    </label>
+                                    <button type="button"
+                                            class="duplicates inline-flex items-center px-3 py-2 font-medium rounded-lg bg-[#e74c3c] text-white hover:bg-[#c0392b] transition-colors duration-200">
+                                        <i class="fas fa-search mr-2"></i>
+                                        {% trans "Check Duplicates" %}
+                                    </button>
+                                </div>
+                                <div class="flex flex-col sm:flex-row gap-4">
+                                    <input id="url"
+                                           type="text"
+                                           name="url"
+                                           value="{{ request.GET.url }}{{ form.url.value|default:'' }}"
+                                           placeholder="https://example.com/report"
+                                           required
+                                           class="placeholder:text-base flex-1 text-lg placeholder:text-gray-400 rounded-lg border-0 ring-1 ring-gray-300 shadow-sm py-3 px-4 focus:ring-2 transition-shadow duration-200 bg-white dark:bg-gray-900" />
+                                </div>
+                                {% if top_domains %}
+                                    <div class="mt-4 space-y-3">
+                                        <div class="flex items-center gap-2">
+                                            <svg class="w-5 h-5 text-gray-500 dark:text-gray-500"
+                                                 fill="none"
+                                                 stroke="currentColor"
+                                                 viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                            </svg>
+                                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Quick Access Domains</span>
+                                        </div>
+                                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                            {% for domain in top_domains %}
+                                                <button type="button"
+                                                        onclick="fillUrl('{{ domain.domain__name }}')"
+                                                        class="group flex items-center gap-3 p-2 bg-white dark:bg-gray-800 hover:bg-gray-50 border border-gray-200 dark:border-gray-700 rounded-lg transition-all duration-200 hover:border-[#e74c3c] hover:shadow-sm">
+                                                    <div class="w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-lg group-hover:bg-white transition-colors">
+                                                        <img src="https://www.google.com/s2/favicons?sz=32&domain_url={{ domain.domain__name }}"
+                                                             alt="{{ domain.domain__name }}"
+                                                             class="w-5 h-5 rounded transition-transform group-hover:scale-110"
+                                                             width="20"
+                                                             height="20">
+                                                    </div>
+                                                    <span class="flex-1 text-sm font-medium text-gray-700 dark:text-gray-300 truncate group-hover:text-[#e74c3c]">
+                                                        {{ domain.domain__name }}
+                                                    </span>
+                                                </button>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <div class="lg:col-span-2">
+                                    <label for="description"
+                                           class="block text-xl font-semibold text-gray-900 dark:text-gray-100">
+                                        {% trans "Bug Title" %}
+                                    </label>
+                                    <input type="text"
+                                           name="description"
+                                           id="description"
+                                           value="{{ request.GET.description }}{{ form.description.value|default:'' }}"
+                                           placeholder="XSS Vulnerability in Bug Report Editor"
+                                           required
+                                           class="w-full text-lg placeholder:text-gray-400 placeholder:text-base rounded-lg border-0 ring-1 ring-gray-300 shadow-sm py-3 px-4 focus:ring-2 transition-shadow duration-200 bg-white dark:bg-gray-900" />
+                                </div>
+                                <div>
+                                    <label for="label"
+                                           class="block text-xl font-semibold text-gray-900 dark:text-gray-100">
+                                        {% trans "Bug Type" %}
+                                    </label>
+                                    <select name="label"
+                                            id="labelSelect"
+                                            required
+                                            class="w-full text-lg rounded-lg border-0 ring-1 ring-gray-300 shadow-sm py-3 px-4 bg-gray-50 dark:bg-gray-900 focus:ring-2 transition-shadow duration-200">
+                                        <option value="0">General</option>
+                                        <option value="1">Number error</option>
+                                        <option value="2">Functional</option>
+                                        <option value="3">Performance</option>
+                                        <option value="4">Security</option>
+                                        <option value="5">Typo</option>
+                                        <option value="6">Design</option>
+                                        <option value="7">Server down</option>
+                                        <option value="8">Trademark Squatting</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100 truncate">{% trans "Bug Description" %}</h2>
+                                    <div class="flex gap-2">
+                                        <button type="button"
+                                                onclick="insertMarkdown('bold')"
+                                                class="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-md transition-colors duration-200">
+                                            <i class="fas fa-bold"></i>
+                                        </button>
+                                        <button type="button"
+                                                onclick="insertMarkdown('italic')"
+                                                class="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-md transition-colors duration-200">
+                                            <i class="fas fa-italic"></i>
+                                        </button>
+                                        <button type="button"
+                                                onclick="insertMarkdown('image')"
+                                                class="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-md transition-colors duration-200">
+                                            <i class="fas fa-image"></i>
+                                        </button>
+                                        <button type="button"
+                                                onclick="insertMarkdown('link')"
+                                                class="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-md transition-colors duration-200">
+                                            <i class="fas fa-link"></i>
+                                        </button>
+                                        <button type="button"
+                                                onclick="togglePreview()"
+                                                class="px-4 py-2 bg-[#e74c3c] hover:bg-[#c0392b] text-white rounded-md transition-colors duration-200">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <textarea id="markdownInput"
+                                          name="markdown_description"
+                                          class="w-full placeholder:text-base h-[300px] p-4 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
+                                          placeholder="Enter your markdown here..."></textarea>
+                                <div id="preview-area"
+                                     class="hidden w-full h-[300px] p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg overflow-y-auto prose prose-sm max-w-none">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+                            <label for="hunt"
+                                   class="block text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                                {% trans "Bug Bounty" %}
+                            </label>
+                            <select name="hunt"
+                                    required
+                                    class="w-full text-lg rounded-lg border-0 ring-1 ring-gray-300 shadow-sm py-3 px-4 bg-gray-50 dark:bg-gray-900 focus:ring-2 transition-shadow duration-200">
+                                {% if not report_on_hunt %}
+                                    <option value="None">{% trans "Report Independently" %}</option>
+                                {% endif %}
+                                {% for hunt in hunts %}<option value="{{ hunt.id }}">{{ hunt.name }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+                            <label for="cve_id"
+                                   class="block text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                                {% trans "CVE ID" %}
+                            </label>
+                            <div class="flex flex-wrap sm:flex-nowrap gap-2 w-full relative">
+                                <input class="flex-1 placeholder:text-base text-lg sm:text-base md:text-lg placeholder:text-gray-400 rounded-lg border border-gray-300 dark:border-gray-600 py-2 px-4 transition-shadow duration-200 min-w-0 bg-white dark:bg-gray-900"
+                                       type="text"
+                                       placeholder="CVE-XXXX-XXXX"
+                                       id="cve_id_input"
+                                       name="cve_id"
+                                       autocomplete="off"
+                                       pattern="CVE-\d{4}-\d{4,7}"
+                                       title="Please enter a valid CVE ID format (e.g. CVE-2024-1234)">
+                                <button type="button"
+                                        onclick="validateCVE()"
+                                        class="px-3 md:py-1 py-4 text-xs sm:text-sm md:text-base bg-[#e74c3c] text-white rounded-lg hover:bg-[#c0392b] transition-colors duration-200 shrink-0 w-full sm:w-auto">
+                                    <i class="fas fa-check md:text-base text-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+                            <label class="block text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">{% trans "Screenshots" %}</label>
+                            <div id="screenshot-container"
+                                 onclick="document.getElementById('screenshots').click()"
+                                 class="relative group border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-[#e74c3c] rounded-xl p-6 transition-all duration-200 cursor-pointer">
+                                <div id="screenshot-hash-container" class="mt-4"></div>
+                                <div class="text-center">
+                                    <div class="w-16 h-16 mx-auto mb-4 text-gray-400 dark:text-gray-600 group-hover:text-[#e74c3c] transition-colors duration-200">
+                                        <i class="fas fa-cloud-upload-alt text-4xl"></i>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="text-lg font-medium text-[#e74c3c] cursor-pointer hover:text-[#c0392b]">
+                                            {% trans "Upload screenshots" %}
+                                            <input id="screenshots"
+                                                   name="screenshots"
+                                                   type="file"
+                                                   class="sr-only"
+                                                   accept="image/*"
+                                                   multiple
+                                                   required
+                                                   max="4" />
+                                        </label>
+                                        <p class="text-sm text-gray-500 dark:text-gray-500">{% trans "Drag & drop or click to upload" %}</p>
+                                        <p class="text-xs text-gray-400 dark:text-gray-600">PNG, JPG, GIF up to 5 images</p>
+                                    </div>
+                                </div>
+                                <div class="mt-2 text-xs text-gray-500 dark:text-gray-500 flex items-center justify-center">
+                                    <i class="fas fa-keyboard mr-1"></i>
+                                    <span>Pro tip: You can also paste images directly (Ctrl+V)</span>
+                                </div>
+                            </div>
+                            <div id="files_manage"
+                                 class="mt-4 w-full flex flex-col gap-4 items-center"></div>
+                        </div>
+                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+                            <div class="flex items-center justify-between">
+                                <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">{% trans "Team Members" %}</h2>
+                                <button onclick="add_email_container()"
+                                        type="button"
+                                        class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg bg-[#e74c3c] text-white hover:bg-[#c0392b] transition-colors duration-200">
+                                    <i class="fas fa-plus mr-2"></i>
+                                    {% trans "Add" %}
+                                </button>
+                            </div>
+                            <p class="text-sm text-gray-500 dark:text-gray-500 mb-4">{% trans "Team members should be Bug Bounty users" %}.</p>
+                            <div class="space-y-3" id="email-container">
+                                <label class="block font-medium text-gray-700 dark:text-gray-300 ">{% trans "Email address:" %}</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-8 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm flex md:flex-row flex-col items-center justify-between gap-8 px-6 py-5">
+                    <div class="flex flex-col items-start gap-2">
+                        <div class="flex items-center gap-2">
+                            <input id="report_anonymous"
+                                   type="checkbox"
+                                   name="report_anonymous"
+                                   class="w-5 h-5 rounded-lg text-[#e74c3c] cursor-pointer ">
+                            <p for="report_anonymous"
+                               class="font-medium text-gray-900 dark:text-gray-100 cursor-pointer select-none">
+                                {% trans "Report Anonymously" %}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-4 md:flex-row items-center justify-center [&>img]:w-[150px] md:[&>input]:w-[30%] [&>input]:w-[50%] [&>input]:border [&>input]:border-gray-800 dark:[&>input]:border-gray-400 [&>input]:p-[10px] [&>input]:text-[1.4rem] [&>input]:ml-2 [&>input]:rounded [&>input]:bg-white dark:[&>input]:bg-gray-900 ">
+                        {{ captcha_form.captcha }}
+                    </div>
+                    <div class="flex gap-4 justify-center">
+                        <button type="button"
+                                onclick="cancelForm()"
+                                class="px-6 py-2 bg-gray-400 dark:bg-gray-500 text-white rounded-lg hover:bg-gray-500 transition-colors duration-200 font-medium">
+                            {% trans "Cancel" %}
+                        </button>
+                        <button type="submit"
+                                name="reportbug_button"
+                                class="px-6 py-2 bg-[#e74c3c] text-white rounded-lg hover:bg-[#c0392b] transition-colors duration-200 font-medium group relative">
+                            {% trans "Report" %}
+                            <!-- Tooltip -->
+                            <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white dark:text-gray-100 text-sm rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap">
+                                <div class="flex items-center gap-2">
+                                    <i class="fas fa-bacon"></i>
+                                    <span>Earn 5 BACON tokens for reporting a bug!</span>
+                                </div>
+                                <!-- Arrow -->
+                                <div class="absolute left-1/2 bottom-0 transform -translate-x-1/2 translate-y-full">
+                                    <div class="border-8 border-transparent border-t-gray-900"></div>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock content %}
+{% block after_js %}
+    <script src="{% static 'js/clipboard.min.js' %}" type="text/javascript"></script>
+    <script src="{% static 'js/issue.js' %}" type="text/javascript"></script>
+    <script type="text/javascript">
+    function isCVEValid(cveNumber) {
+        const cveRegex = /^CVE-\d{4}-\d{4,7}$/;
+        return cveRegex.test(cveNumber);
+    }
+
+    function validateCVE() {
+        const cveInput = document.getElementById('cve_id_input').value;
+        const validationResult = document.getElementById('cve_id_input');
+        //check for empty submission(allow form submission)
+        if (!cveInput.trim()) {
+            validationResult.style.borderColor = '';
+            return true;
+        }
+
+        if (isCVEValid(cveInput)) {
+            validationResult.style.borderColor = 'green';
+        } else {
+            validationResult.style.borderColor = 'red';
+            return false;
+        }
+    }
+
+    // CVE Autocomplete functionality
+    (function() {
+        const cveInput = document.getElementById('cve_id_input');
+        if (!cveInput) return;
+
+        let autocompleteBox = null;
+        let debounceTimer = null;
+        let selectedIndex = -1;
+        let suggestions = [];
+        let lastQuery = '';  // Track the latest query to prevent stale results
+        let requestId = 0;   // Unique ID for each request
+
+        function createAutocompleteBox() {
+            if (autocompleteBox) return autocompleteBox;
+            autocompleteBox = document.createElement('div');
+            autocompleteBox.id = 'cve_autocomplete_box';
+            autocompleteBox.className = 'absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto';
+            autocompleteBox.style.display = 'none';
+            // Add ARIA attributes for accessibility
+            autocompleteBox.setAttribute('role', 'listbox');
+            autocompleteBox.setAttribute('aria-label', 'CVE ID suggestions');
+            cveInput.parentElement.style.position = 'relative';
+            cveInput.parentElement.appendChild(autocompleteBox);
+            cveInput.setAttribute('role', 'combobox');
+            cveInput.setAttribute('aria-autocomplete', 'list');
+            cveInput.setAttribute('aria-controls', 'cve_autocomplete_box');
+            cveInput.setAttribute('aria-expanded', 'false');
+            return autocompleteBox;
+        }
+
+        function hideAutocomplete() {
+            if (autocompleteBox) {
+                autocompleteBox.style.display = 'none';
+                cveInput.setAttribute('aria-expanded', 'false');
+            }
+            selectedIndex = -1;
+            suggestions = [];
+        }
+
+        function showSuggestions(results, forQuery) {
+            // Validate that this response matches the current query (prevent race condition)
+            if (forQuery !== lastQuery) {
+                return; // Ignore stale response
+            }
+            
+            if (!autocompleteBox) createAutocompleteBox();
+            if (results.length === 0) {
+                hideAutocomplete();
+                return;
+            }
+
+            suggestions = results;
+            // Clear existing content
+            autocompleteBox.innerHTML = '';
+            
+            // Create elements safely using textContent to prevent XSS
+            results.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = `px-4 py-2 cursor-pointer hover:bg-[#e74c3c] hover:text-white dark:hover:bg-[#c0392b] ${index === selectedIndex ? 'bg-[#e74c3c] text-white dark:bg-[#c0392b]' : 'text-gray-900 dark:text-gray-100'}`;
+                div.setAttribute('data-index', index);
+                div.setAttribute('role', 'option'); // Add ARIA role for accessibility
+                div.setAttribute('id', `cve-option-${index}`);
+                div.textContent = item.text; // Use textContent instead of innerHTML to prevent XSS
+                div.addEventListener('click', function() {
+                    selectSuggestion(index);
+                });
+                autocompleteBox.appendChild(div);
+            });
+
+            autocompleteBox.style.display = 'block';
+            cveInput.setAttribute('aria-expanded', 'true');
+        }
+
+        function selectSuggestion(index) {
+            if (index >= 0 && index < suggestions.length) {
+                cveInput.value = suggestions[index].text;
+                cveInput.style.borderColor = 'green';
+                hideAutocomplete();
+                validateCVE();
+            }
+        }
+
+        async function fetchCVESuggestions(query) {
+            if (query.length < 3) {
+                hideAutocomplete();
+                return;
+            }
+
+            // Track this request to prevent race conditions
+            const currentRequestId = ++requestId;
+            lastQuery = query;
+
+            try {
+                const response = await fetch(`/api/v1/cve/autocomplete/?q=${encodeURIComponent(query)}`);
+                if (!response.ok) throw new Error('API request failed');
+                const data = await response.json();
+                
+                // Only process if this is still the latest request
+                if (currentRequestId === requestId) {
+                    showSuggestions(data.results || [], query);
+                }
+            } catch (error) {
+                console.error('Error fetching CVE suggestions:', error);
+                if (currentRequestId === requestId) {
+                    hideAutocomplete();
+                }
+            }
+        }
+
+        cveInput.addEventListener('input', function(e) {
+            const query = e.target.value.trim().toUpperCase();
+            
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+            }
+
+            if (query.length >= 3) {
+                debounceTimer = setTimeout(() => {
+                    fetchCVESuggestions(query);
+                }, 300);
+            } else {
+                hideAutocomplete();
+            }
+        });
+
+        cveInput.addEventListener('keydown', function(e) {
+            if (!autocompleteBox || autocompleteBox.style.display === 'none') return;
+
+            switch(e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    selectedIndex = Math.min(selectedIndex + 1, suggestions.length - 1);
+                    updateSelection();
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    selectedIndex = Math.max(selectedIndex - 1, -1);
+                    updateSelection();
+                    break;
+                case 'Enter':
+                    if (selectedIndex >= 0) {
+                        e.preventDefault();
+                        selectSuggestion(selectedIndex);
+                    }
+                    break;
+                case 'Escape':
+                    e.preventDefault();
+                    hideAutocomplete();
+                    break;
+            }
+        });
+
+        function updateSelection() {
+            if (!autocompleteBox) return;
+            autocompleteBox.querySelectorAll('div[data-index]').forEach((item, index) => {
+                if (index === selectedIndex) {
+                    item.className = 'px-4 py-2 cursor-pointer bg-[#e74c3c] text-white dark:bg-[#c0392b]';
+                } else {
+                    item.className = 'px-4 py-2 cursor-pointer hover:bg-[#e74c3c] hover:text-white dark:hover:bg-[#c0392b] text-gray-900 dark:text-gray-100';
+                }
+            });
+        }
+
+        // Hide autocomplete when clicking outside
+        document.addEventListener('click', function(e) {
+            if (autocompleteBox && !cveInput.contains(e.target) && !autocompleteBox.contains(e.target)) {
+                hideAutocomplete();
+            }
+        });
+    })();
+    const screenshots = document.getElementById('screenshots');
+    let manage_div = document.getElementById("files_manage");
+
+    function escapeHtml(str) {return str.replace(/[&<>"']/g, function (s) {var entityMap = {"&": "&amp;","<": "&lt;",">": "&gt;",'"': '&quot;',"'": '&#39;',};return entityMap[s];});}
+    function previewFile(file_name) {
+        event.preventDefault();
+        Array.from(screenshots.files).map(file => {
+            if (file.name === file_name) {
+                let src = URL.createObjectURL(file);
+                if (src.startsWith('blob:')) {
+                    let escapedSrc = escapeHtml(src);
+                    $("#image-preview").attr("src", escapedSrc);
+                    $("#image-preview-wrapper").show();
+                }else {$("#image-preview-wrapper").hide();}
+            }
+        });
+    }
+
+    $("#image-preview-wrapper").on("click", () => {
+        event.preventDefault();
+        $("#image-preview-wrapper").hide();
+    })
+
+    function removeFile(fileName) {
+        event.preventDefault();
+
+    }
+
+    screenshots.addEventListener('change', (event) => {
+
+        const fileList = Array.from(event.target.files);
+
+        fileList.map(file => {
+            let src = URL.createObjectURL(file);
+            let safeName = $("<div>").text(file.name).html();
+            let safeNameDisplay = safeName.slice(0, 20) + (safeName.length > 20 ? "..." : "");
+            // Use the safe name for display and in the onclick handler
+            let fileDiv = $("<div>").addClass("w-full md:w-[300px] h-[180px] overflow-hidden rounded-lg").attr("onclick", `previewFile('${safeName}')`);
+            let titleDiv = $("<div>").addClass("w-full h-10 flex justify-center rounded-t-lg p-2 bg-gray-500");
+            let titleP = $("<p>").addClass("text-xl text-white font-bold").text(safeNameDisplay);
+            let img = $("<img>").addClass("object-cover").attr("src", escapeHtml(src));
+
+            titleDiv.append(titleP);
+            fileDiv.append(titleDiv).append(img);
+            $("#files_manage").append(fileDiv);
+        })
+
+    });
+
+
+    // Cancel form function
+    function cancelForm() {
+        if (confirm('Are you sure you want to cancel? All entered data will be lost.')) {
+            // Use window.history.back() or redirect to home
+            window.location.href = '{% url "home" %}';
+        }
+    }
+
+    $(function () {
+        // Check Duplicates button handler - using new duplicate checker API
+        $(".duplicates").click(async (event) => {
+            const uri = $("input[name='url']").val();
+            const title = $("input[name='description']").val();
+            const markdownDesc = $("textarea[name='markdown_description']").val();
+
+            if (!uri || !title) {
+                alert('Please enter both URL and bug title to check for duplicates.');
+                return;
+            }
+
+            // Combine title and description for better duplicate detection
+            const fullDescription = title + (markdownDesc ? '. ' + markdownDesc : '');
+
+            // Show loading state - scope to clicked button
+            const button = $(event.currentTarget);
+            const originalText = button.html();
+            button.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-2"></i>Checking...');
+
+            try {
+                $("#view_all").attr("href", `/search/?query=${encodeURIComponent(uri)}`);
+
+                // Use new duplicate checker API
+                let resp = await fetch("/api/v1/bugs/check-duplicate/", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        "url": uri,
+                        "description": fullDescription
+                    })
+                });
+
+                if (!resp.ok) {
+                    throw new Error(`HTTP error! status: ${resp.status}`);
+                }
+
+                let data = await resp.json();
+
+                $("#duplicate-list").html("");
+
+                if (data.similar_bugs && data.similar_bugs.length > 0) {
+                    data.similar_bugs.forEach(bug => add_duplicates(bug, data.confidence));
+                    $("#duplicate-container").show();
+                } else {
+                    alert('No similar bugs found! This appears to be a new issue.');
+                }
+
+            } catch (error) {
+                console.error('Error checking duplicates:', error);
+                alert('Error checking for duplicates. Please try again.');
+            } finally {
+                // Restore button state
+                button.prop('disabled', false).html(originalText);
+            }
+        });
+
+        $("#close-duplicate-container").click(() => {
+            $("#duplicate-container").hide();
+        });
+
+        // Helper function to get CSRF token
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        // Updated add_duplicates function for new API response format
+        let add_duplicates = (bug, confidence) => {
+            const similarityPercent = Math.round((bug.similarity || 0) * 100);
+            // Use per-bug similarity for color, not global confidence
+            const confidenceColor = similarityPercent >= 70 ? 'bg-red-100 text-red-800' : 
+                                    similarityPercent >= 60 ? 'bg-orange-100 text-orange-800' : 
+                                    'bg-blue-100 text-blue-800';
+            
+            const createdDate = new Date(bug.created);
+            const formattedDate = createdDate.toLocaleDateString();
+            
+            // Defensive defaults for potentially missing fields
+            const bugUser = bug.user || 'Anonymous';
+            const bugUpvotes = bug.upvotes || 0;
+            const bugStatus = bug.status || 'unknown';
+            const bugDescription = bug.description || 'No description';
+            const bugUrl = bug.url || '';
+
+            $("#duplicate-list").append(`
+                <li class="py-3 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                    <div class="flex items-start space-x-4 px-4">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-2">
+                                <a href="/issue/${bug.id}" target="_blank" class="text-lg font-bold text-blue-600 hover:text-blue-800 dark:text-blue-400">
+                                    Bug #${bug.id}
+                                </a>
+                                <span class="px-2 py-1 text-xs font-semibold rounded-full ${confidenceColor}">
+                                    ${similarityPercent}% match
+                                </span>
+                                <span class="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300">
+                                    ${bugStatus}
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                                ${escapeHtml(bugDescription)}
+                            </p>
+                            <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                                <span><i class="fas fa-user mr-1"></i>${escapeHtml(bugUser)}</span>
+                                <span><i class="fas fa-calendar mr-1"></i>${formattedDate}</span>
+                                <span><i class="fas fa-thumbs-up mr-1"></i>${bugUpvotes} upvotes</span>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+                                <i class="fas fa-link mr-1"></i>${escapeHtml(bugUrl)}
+                            </div>
+                        </div>
+                    </div>
+                </li>
+            `);
+        };
+
+    });
+
+
+    function removeErrors(){
+        var errors = document.getElementsByClassName('popup-errors');
+        var errorsArray = Array.from(errors);
+
+        // Remove each element from the DOM
+        errorsArray.forEach(function(error) {
+            error.remove();
+        });
+    }
+
+
+    function remove_email_container(){
+        let email_container = document.getElementById("email-container");
+        let lst_child = email_container.lastElementChild;
+        email_container.removeChild(lst_child);
+    }
+
+    function add_email_container(){
+        const email_container_child_html = document.createElement('div');
+        email_container_child_html.innerHTML = `
+            <div class="mt-2 flex flex-row items-center w-[70%]">
+                <input name="team_members" type="email" autocomplete="email" required class="w-[90%] mt-2 text-xl block rounded-md border-0 py-3 pl-3 text-gray-900 dark:text-gray-100 shadow-sm placeholder:text-gray-400 ring-1 ring-gray-300 bg-white dark:bg-gray-900" />
+                <button type="button" onclick="remove_email_container()">
+                    <i class="fa-sharp fa-solid fa-trash fa-lg text-[#596780] ml-4 hover:text-black"></i>
+                </button>
+            </div>
+        `;
+
+        let email_container = document.getElementById("email-container");
+        email_container.appendChild(email_container_child_html)
+    }
+    // Enhanced paste functionality for screenshot uploads
+document.addEventListener('DOMContentLoaded', function() {
+    // Make the entire page listen for paste events
+    document.addEventListener('paste', function(e) {
+        // Only process paste if we're focused on relevant elements or the document body
+        const activeElement = document.activeElement;
+        const notInTextInput = activeElement.tagName !== 'INPUT' && 
+                              activeElement.tagName !== 'TEXTAREA' && 
+                              !activeElement.isContentEditable;
+        
+        if (notInTextInput || activeElement === document.body) {
+            var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            let foundImage = false;
+            
+            for (var index in items) {
+                var item = items[index];
+                if (item.kind === 'file' && item.type.indexOf('image/') !== -1) {
+                    foundImage = true;
+                    var blob = item.getAsFile();
+                    var reader = new FileReader();
+                    
+                    reader.onload = function(event) {
+                        // Create a unique filename with timestamp
+                        const timestamp = new Date().getTime();
+                        const filename = `pasted-image-${timestamp}.png`;
+                        
+                        // Create a File object from the blob with our custom filename
+                        var file = new File([blob], filename, {type: blob.type});
+                        
+                        // Add file to the file input
+                        var dt = new DataTransfer();
+                        var fileInput = document.getElementById('screenshots');
+                        
+                        // Add existing files
+                        if (fileInput && fileInput.files) {
+                            for (var i = 0; i < fileInput.files.length; i++) {
+                                dt.items.add(fileInput.files[i]);
+                            }
+                        }
+                        
+                        // Add the new file
+                        dt.items.add(file);
+                        
+                        // Replace the file input's FileList
+                        if (fileInput) {
+                            fileInput.files = dt.files;
+                            
+                            // Trigger the change event to update the UI
+                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            
+                            // Show toast notification
+                            showToast('Image pasted successfully!');
+                        }
+                    };
+                    reader.readAsDataURL(blob);
+                    break;
+                }
+            }
+            
+            if (foundImage) {
+                e.preventDefault();
+            }
+        }
+    });
+    
+    // Add a toast notification system
+    if (!document.getElementById('toast-container')) {
+        const toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 10000;';
+        document.body.appendChild(toastContainer);
+    }
+});
+
+// Function to show toast notifications
+function showToast(message, type = 'success') {
+    const toastContainer = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    
+    // Set toast styling based on type
+    const backgroundColor = type === 'success' ? '#10b981' : '#ef4444';
+    
+    toast.style.cssText = `
+        background-color: ${backgroundColor};
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        margin-top: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        display: flex;
+        align-items: center;
+        opacity: 0;
+        transform: translateY(20px);
+        transition: all 0.3s ease;
+    `;
+    
+    // Add icon based on type
+    const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+    toast.innerHTML = `
+        <i class="fas ${icon} mr-2"></i>
+        <span>${message}</span>
+    `;
+    
+    toastContainer.appendChild(toast);
+    
+    // Trigger animation
+    setTimeout(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+    }, 10);
+    
+    // Auto-remove toast after 3 seconds
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        
+        setTimeout(() => {
+            toastContainer.removeChild(toast);
+        }, 300);
+    }, 3000);
+}
+
+    document.addEventListener("DOMContentLoaded", function() {
+        // Get the value from the URL parameter
+        var labelParam = new URLSearchParams(window.location.search).get("label");
+
+        // Set the selected option based on the parameter
+        if (labelParam !== null) {
+            document.getElementById("labelSelect").value = labelParam;
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const params = new URLSearchParams(window.location.search);
+        const hashValue = params.get('hash');
+        const screenshotsInput = document.getElementById('screenshots');
+        
+        if (hashValue) {
+            // Hide the upload container
+            document.getElementById('screenshot-container').style.display = 'none';
+            
+            // Remove required attribute from screenshots input when we have a hash
+            screenshotsInput.removeAttribute('required');
+            
+            // Create and show the hash image
+            const container = document.getElementById('screenshot-hash-container');
+            container.innerHTML = `
+                <img src="{{ MEDIA_URL }}uploads/${hashValue}.png" class="img-responsive img-thumbnail screenshot-hash" width="100%" height="100%" alt="Uploaded bug report screenshot">
+                <input type="hidden" required class="required" name="screenshot-hash" value="${hashValue}">
+            `;
+        } else {
+            // Hide the hash container
+            document.getElementById('screenshot-hash-container').style.display = 'none';
+            
+            // Ensure screenshots input is required when there's no hash
+            screenshotsInput.setAttribute('required', '');
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Target the screenshot container for paste events
+        const screenshotContainer = document.getElementById('screenshot-container');
+        if (screenshotContainer) {
+            screenshotContainer.addEventListener('paste', function (e) {
+                var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+                for (var index in items) {
+                    var item = items[index];
+                    if (item.kind === 'file') {
+                        var blob = item.getAsFile();
+                        var reader = new FileReader();
+                        reader.onload = function(event){
+                            var img = new Image();
+                            img.src = event.target.result;
+
+                            var file = new File([blob], "pasted-image.png", {type: blob.type});
+
+                            var dt = new DataTransfer();
+                            var file_input = document.getElementById('screenshots');
+
+                            // Add the existing files to the DataTransfer
+                            if (file_input) {
+                                for (var i = 0; i < file_input.files.length; i++) {
+                                    dt.items.add(file_input.files[i]);
+                                }
+
+                                // Add the new file to the DataTransfer
+                                dt.items.add(file);
+
+                                // Replace the file input's FileList with the new one
+                                file_input.files = dt.files;
+                                file_input.dispatchEvent(new Event('change'));
+                            }
+                        };
+                        reader.readAsDataURL(blob);
+                    }
+                }
+            });
+        }
+    });
+
+    function fillUrl(domain) {
+        const urlInput = document.getElementById('url');
+        if (!domain.startsWith('http')) {
+            domain = 'https://' + domain;
+        }
+        urlInput.value = domain;
+    }
+
+    // Remove the old domain click handler and use this one
+    document.addEventListener('DOMContentLoaded', function() {
+        const domainButtons = document.querySelectorAll('[onclick^="fillUrl"]');
+        domainButtons.forEach(button => {
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                const domain = this.querySelector('span').textContent.trim();
+                fillUrl(domain);
+            });
+        });
+    });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script type="text/javascript">
+    function insertMarkdown(type) {
+        const editor = document.getElementById('markdownInput');
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        const selectedText = editor.value.substring(start, end);
+        let insertion = '';
+
+        switch(type) {
+            case 'bold':
+                insertion = selectedText ? `**${selectedText}**` : '**bold text**';
+                break;
+            case 'italic':
+                insertion = selectedText ? `*${selectedText}*` : '*italic text*';
+                break;
+            case 'image':
+                insertion = '![image description](image url)';
+                break;
+            case 'link':
+                insertion = selectedText ? `[${selectedText}](url)` : '[link text](url)';
+                break;
+        }
+
+        editor.focus();
+        document.execCommand('insertText', false, insertion);
+
+        // For browsers that don't support execCommand
+        if (!document.execCommand) {
+            const before = editor.value.substring(0, start);
+            const after = editor.value.substring(end);
+            editor.value = before + insertion + after;
+        }
+
+        // Update cursor position
+        const newCursorPos = start + insertion.length;
+        editor.setSelectionRange(newCursorPos, newCursorPos);
+    }
+
+    function togglePreview() {
+        const editor = document.getElementById('markdownInput');
+        const preview = document.getElementById('preview-area');
+        const previewBtn = document.querySelector('button:contains("Preview")');
+
+        if (preview.classList.contains('hidden')) {
+            // Show preview
+            preview.innerHTML = marked.parse(editor.value);
+            preview.classList.remove('hidden');
+            editor.classList.add('hidden');
+            previewBtn.textContent = 'Edit';
+        } else {
+            // Show editor
+            preview.classList.add('hidden');
+            editor.classList.remove('hidden');
+            previewBtn.textContent = 'Preview';
+        }
+    }
+    marked.setOptions({
+        sanitize: true,
+        breaks: true
+    });
+
+
+    </script>
+{% endblock after_js %}
