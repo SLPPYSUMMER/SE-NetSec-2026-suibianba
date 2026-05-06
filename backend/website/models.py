@@ -3756,3 +3756,254 @@ class SecurityIncidentHistory(models.Model):
     def __str__(self):
         changer = self.changed_by.username if self.changed_by else "System"
         return f"{self.field_name} changed by {changer}"
+
+
+# ==============================================================================
+# SecGuard 二次开发新增模型 (SecGuard Custom Models)
+# ==============================================================================
+
+
+class Report(models.Model):
+    """
+    漏洞报告 (Vulnerability Report) —— SecGuard 平台的核心工单模型。
+    实现漏洞从上报→分派→修复→复核→关闭的完整生命周期闭环。
+    取代原版 BLT Issue 作为 SecGuard 的主业务实体。
+    """
+
+    class Severity(models.TextChoices):
+        CRITICAL = "critical", "严重"
+        HIGH = "high", "高危"
+        MEDIUM = "medium", "中危"
+        LOW = "low", "低危"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "待分派"
+        PROCESSING = "processing", "处理中"
+        FIXED = "fixed", "已修复"
+        REVIEWING = "reviewing", "已复核"
+        CLOSED = "closed", "已关闭"
+
+    # ---- 主键：自定义漏洞编号 ----
+    vuln_id = models.CharField(
+        max_length=50,
+        primary_key=True,
+        help_text="自定义漏洞编号，如 SEC-2026-0001",
+    )
+
+    # ---- 基本信息 ----
+    title = models.CharField(max_length=255, help_text="漏洞标题")
+    description = models.TextField(help_text="漏洞详细描述")
+    severity = models.CharField(
+        max_length=20,
+        choices=Severity.choices,
+        default=Severity.MEDIUM,
+        help_text="漏洞危害等级",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        help_text="漏洞当前状态",
+    )
+
+    # ---- 关联人员 ----
+    reporter = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="secguard_reported",
+        help_text="漏洞上报人",
+    )
+    assignee = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="secguard_assigned",
+        help_text="当前处理人",
+    )
+
+    # ---- 关联项目 ----
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="secguard_reports",
+        help_text="所属项目",
+    )
+
+    # ---- 时间戳 ----
+    created_at = models.DateTimeField(auto_now_add=True, help_text="上报时间")
+    updated_at = models.DateTimeField(auto_now=True, help_text="最后更新时间")
+
+    def save(self, *args, **kwargs):
+        """
+        自动生成漏洞编号：SEC-<年份>-<四位序号>
+        例如：SEC-2026-0001, SEC-2026-0002, ...
+        """
+        if not self.vuln_id:
+            year = timezone.now().year
+            prefix = f"SEC-{year}-"
+            last = (
+                Report.objects.filter(vuln_id__startswith=prefix)
+                .order_by("-vuln_id")
+                .first()
+            )
+            if last:
+                last_num = int(last.vuln_id.split("-")[-1])
+                self.vuln_id = f"{prefix}{last_num + 1:04d}"
+            else:
+                self.vuln_id = f"{prefix}0001"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"[{self.vuln_id}] {self.title} ({self.get_severity_display()})"
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status"], name="report_status_idx"),
+            models.Index(fields=["severity"], name="report_severity_idx"),
+            models.Index(fields=["assignee"], name="report_assignee_idx"),
+            models.Index(fields=["-created_at"], name="report_created_idx"),
+        ]
+        verbose_name = "漏洞报告"
+        verbose_name_plural = "漏洞报告"
+
+
+class ScanTask(models.Model):
+    """
+    扫描任务 (Scan Task) —— 记录通过 Nettacker 等工具发起的自动化扫描。
+    支持扫描进度同步和结果入库。
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "排队中"
+        RUNNING = "running", "运行中"
+        FINISHED = "finished", "已完成"
+        FAILED = "failed", "失败"
+
+    name = models.CharField(max_length=255, help_text="任务名称")
+    target = models.CharField(max_length=255, help_text="扫描目标 (IP/域名)")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        help_text="扫描器运行状态",
+    )
+    progress = models.IntegerField(
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="扫描进度百分比 (0-100)",
+    )
+    scanner_type = models.CharField(
+        max_length=50, default="nettacker", help_text="扫描器类型"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="secguard_scan_tasks",
+        help_text="任务发起人",
+    )
+    started_at = models.DateTimeField(auto_now_add=True, help_text="任务创建时间")
+    finished_at = models.DateTimeField(
+        null=True, blank=True, help_text="扫描结束时间"
+    )
+
+    def __str__(self):
+        return f"[{self.get_status_display()}] {self.name} -> {self.target}"
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["status"], name="scantask_status_idx"),
+            models.Index(fields=["-started_at"], name="scantask_started_idx"),
+        ]
+        verbose_name = "扫描任务"
+        verbose_name_plural = "扫描任务"
+
+
+class Vulnerability(models.Model):
+    """
+    自动发现的漏洞 (Vulnerability) —— Nettacker 扫描结果的原始数据。
+    可通过 report 字段关联到人工审核的 Report 工单，进入修复闭环。
+    """
+
+    scan_task = models.ForeignKey(
+        ScanTask,
+        on_delete=models.CASCADE,
+        related_name="vulnerabilities",
+        help_text="所属扫描任务",
+    )
+    cve_id = models.CharField(
+        max_length=50, null=True, blank=True, help_text="CVE 编号"
+    )
+    title = models.CharField(max_length=255, help_text="漏洞名称")
+    description = models.TextField(help_text="原始扫描描述 / Payload")
+    solution = models.TextField(blank=True, default="", help_text="修复建议")
+    severity = models.CharField(max_length=20, help_text="危害等级")
+    report = models.OneToOneField(
+        Report,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_vulnerability",
+        help_text="关联的人工漏洞报告工单（确认后转入修复流程）",
+    )
+    discovered_at = models.DateTimeField(auto_now_add=True, help_text="发现时间")
+
+    def __str__(self):
+        cve = f" ({self.cve_id})" if self.cve_id else ""
+        return f"{self.title}{cve}"
+
+    class Meta:
+        ordering = ["-discovered_at"]
+        indexes = [
+            models.Index(fields=["cve_id"], name="vuln_cve_id_idx"),
+            models.Index(fields=["severity"], name="vuln_severity_idx"),
+        ]
+        verbose_name = "扫描漏洞"
+        verbose_name_plural = "扫描漏洞"
+
+
+class AuditLog(models.Model):
+    """
+    审计日志 (Audit Log) —— 记录漏洞工单的所有关键操作。
+    用于在漏洞详情页展示时间轴 (Timeline)，满足安全审计合规要求。
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="secguard_audit_logs",
+        help_text="操作人",
+    )
+    action = models.CharField(max_length=50, help_text="操作类型")
+    target_type = models.CharField(
+        max_length=50, help_text="目标类型 (如 Report, ScanTask)"
+    )
+    target_id = models.CharField(
+        max_length=50, help_text="目标对象的主键 ID"
+    )
+    detail = models.TextField(
+        blank=True, default="", help_text="操作详情/备注"
+    )
+    ip_address = models.GenericIPAddressField(
+        null=True, blank=True, help_text="操作 IP 地址"
+    )
+    timestamp = models.DateTimeField(auto_now_add=True, help_text="操作时间")
+
+    def __str__(self):
+        username = self.user.username if self.user else "System"
+        return f"[{self.timestamp:%Y-%m-%d %H:%M}] {username} {self.action} {self.target_type}#{self.target_id}"
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(
+                fields=["target_type", "target_id"],
+                name="auditlog_target_idx",
+            ),
+            models.Index(fields=["-timestamp"], name="auditlog_time_idx"),
+        ]
+        verbose_name = "审计日志"
+        verbose_name_plural = "审计日志"

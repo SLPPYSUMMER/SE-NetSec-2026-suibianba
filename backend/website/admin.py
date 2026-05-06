@@ -17,6 +17,7 @@ from website.models import (
     ActivityLog,
     Adventure,
     AdventureTask,
+    AuditLog,
     BaconEarning,
     BaconSubmission,
     BaconToken,
@@ -69,7 +70,9 @@ from website.models import (
     Rating,
     ReminderSettings,
     Repo,
+    Report,
     Room,
+    ScanTask,
     Section,
     SlackBotActivity,
     SlackIntegration,
@@ -91,6 +94,7 @@ from website.models import (
     UserProfile,
     UserTaskProgress,
     UserTaskSubmission,
+    Vulnerability,
     Wallet,
     Winner,
 )
@@ -1262,3 +1266,86 @@ class UserTaskSubmissionAdmin(admin.ModelAdmin):
         ("Submission Information", {"fields": ("progress", "task", "proof_url", "notes", "submitted_at")}),
         ("Review Information", {"fields": ("status", "approved", "reviewed_by", "reviewed_at", "reviewer_notes")}),
     )
+
+
+# ==============================================================================
+# SecGuard 二次开发 Admin 注册 (SecGuard Custom Admin)
+# ==============================================================================
+
+
+@admin.register(Report)
+class ReportAdmin(admin.ModelAdmin):
+    """漏洞报告管理"""
+    list_display = (
+        "vuln_id",
+        "title",
+        "severity",
+        "status",
+        "reporter",
+        "assignee",
+        "project",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("severity", "status", "project", "created_at")
+    search_fields = ("vuln_id", "title", "description", "reporter__username", "assignee__username")
+    list_editable = ("status", "assignee")
+    date_hierarchy = "created_at"
+    ordering = ("-created_at",)
+
+
+@admin.register(ScanTask)
+class ScanTaskAdmin(admin.ModelAdmin):
+    """扫描任务管理"""
+    list_display = (
+        "id",
+        "name",
+        "target",
+        "scanner_type",
+        "status",
+        "progress",
+        "created_by",
+        "started_at",
+        "finished_at",
+    )
+    list_filter = ("status", "scanner_type", "started_at")
+    search_fields = ("name", "target", "created_by__username")
+    date_hierarchy = "started_at"
+    ordering = ("-started_at",)
+
+
+@admin.register(Vulnerability)
+class VulnerabilityAdmin(admin.ModelAdmin):
+    """扫描漏洞管理"""
+    list_display = (
+        "id",
+        "title",
+        "cve_id",
+        "severity",
+        "scan_task",
+        "report",
+        "discovered_at",
+    )
+    list_filter = ("severity", "discovered_at")
+    search_fields = ("title", "cve_id", "description")
+    date_hierarchy = "discovered_at"
+    ordering = ("-discovered_at",)
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    """审计日志管理"""
+    list_display = (
+        "id",
+        "user",
+        "action",
+        "target_type",
+        "target_id",
+        "ip_address",
+        "timestamp",
+    )
+    list_filter = ("action", "target_type", "timestamp")
+    search_fields = ("user__username", "action", "target_id", "detail")
+    date_hierarchy = "timestamp"
+    ordering = ("-timestamp",)
+    readonly_fields = ("user", "action", "target_type", "target_id", "detail", "ip_address", "timestamp")
