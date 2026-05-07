@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import { mockScanTasks } from '@/services/mockData';
 import {
   Search,
   Plus,
@@ -14,39 +15,6 @@ import {
   ChevronRight,
   Activity,
 } from 'lucide-react';
-
-const scanTasks = [
-  {
-    id: 'SC-0821',
-    name: 'Main_Portal_Daily',
-    url: 'https://api.internal.com',
-    status: '运行中',
-    statusColor: 'text-cyan-400',
-    progress: 64,
-    findings: 14,
-    lastRun: '2023-11-24 10:30',
-  },
-  {
-    id: 'SC-0620',
-    name: 'CRM_System_Deep',
-    url: 'https://crm.secguard.io',
-    status: '已排队',
-    statusColor: 'text-yellow-400',
-    progress: 0,
-    findings: '--',
-    lastRun: '待执行',
-  },
-  {
-    id: 'SC-0409',
-    name: 'Auth_Module_Sprint',
-    url: 'https://auth.secguard.io',
-    status: '已完成',
-    statusColor: 'text-green-400',
-    progress: 100,
-    findings: 31,
-    lastRun: '2023-11-23 22:15',
-  },
-];
 
 export default function ScansPage() {
   const [targetUrl, setTargetUrl] = useState('');
@@ -208,7 +176,7 @@ export default function ScansPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-dark-border">
-                {scanTasks.map((task, index) => (
+                {mockScanTasks.map((task, index) => (
                   <tr
                     key={index}
                     className="hover:bg-dark-hover transition-colors"

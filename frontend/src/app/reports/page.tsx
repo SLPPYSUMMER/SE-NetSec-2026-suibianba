@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import { mockReportChartData } from '@/services/mockData';
 import {
   Filter,
   TrendingUp,
@@ -21,13 +22,6 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-
-const chartData = [
-  { name: 'W1', value: 65 },
-  { name: 'W2', value: 48 },
-  { name: 'W3', value: 85 },
-  { name: 'W4', value: 72 },
-];
 
 export default function ReportsPage() {
   const [selectedProject, setSelectedProject] = useState('all');
@@ -200,7 +194,7 @@ export default function ReportsPage() {
                     <div className="bg-dark-bg rounded-lg p-6">
                       <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={chartData}>
+                          <BarChart data={mockReportChartData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#1e2433" />
                             <XAxis dataKey="name" stroke="#6b7280" fontSize={12} />
                             <YAxis stroke="#6b7280" fontSize={12} />

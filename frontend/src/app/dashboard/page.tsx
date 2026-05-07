@@ -4,6 +4,12 @@ import { useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import {
+  mockDashboardStats,
+  mockVulnerabilityData,
+  mockTrendData,
+  mockRecentVulnerabilities,
+} from '@/services/mockData';
+import {
   ShieldCheck,
   AlertTriangle,
   CheckCircle,
@@ -26,86 +32,6 @@ import {
   Cell,
 } from 'recharts';
 
-const statsData = [
-  {
-    title: '漏洞总数',
-    value: '1,284',
-    icon: ShieldCheck,
-    change: '+12.5%',
-    color: 'text-primary',
-    bgColor: 'bg-primary/10',
-  },
-  {
-    title: '待修复',
-    value: '342',
-    icon: AlertTriangle,
-    change: '高风险',
-    color: 'text-red-500',
-    bgColor: 'bg-red-500/10',
-  },
-  {
-    title: '已修复',
-    value: '942',
-    icon: CheckCircle,
-    change: '',
-    color: 'text-green-500',
-    bgColor: 'bg-green-500/10',
-  },
-  {
-    title: '平均修复时长',
-    value: '4.2',
-    unit: 'Days',
-    icon: Clock,
-    change: '',
-    color: 'text-yellow-500',
-    bgColor: 'bg-yellow-500/10',
-  },
-];
-
-const vulnerabilityData = [
-  { name: '极危险 (Critical)', value: 12, color: '#ef4444' },
-  { name: '高危 (High)', value: 28, color: '#f97316' },
-  { name: '中危 (Medium)', value: 45, color: '#eab308' },
-  { name: '低危 (Low)', value: 15, color: '#22c55e' },
-];
-
-const trendData = [
-  { name: 'MON', value: 30 },
-  { name: 'TUE', value: 45 },
-  { name: 'WED', value: 35 },
-  { name: 'THU', value: 65 },
-  { name: 'FRI', value: 85 },
-  { name: 'SAT', value: 70 },
-  { name: 'SUN', value: 55 },
-];
-
-const recentVulnerabilities = [
-  {
-    id: 'CVE-2024-3812',
-    title: '核心网关权限提升漏洞 (RCE)',
-    severity: 'CRITICAL',
-    severityColor: 'bg-red-500',
-    assignee: '张景瑞',
-    date: '2024-05-18',
-  },
-  {
-    id: 'CVE-2023-4512',
-    title: 'SQL注入漏洞导致敏感数据泄露',
-    severity: 'HIGH RISK',
-    severityColor: 'bg-orange-500',
-    assignee: '李伟',
-    date: '2024-05-17',
-  },
-  {
-    id: 'CVE-2024-1102',
-    title: '跨站脚本攻击 (XSS) 风险',
-    severity: 'MEDIUM',
-    severityColor: 'bg-yellow-500',
-    assignee: '孔凡',
-    date: '2024-05-10',
-  },
-];
-
 export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-dark-bg">
@@ -122,7 +48,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {statsData.map((stat, index) => (
+            {mockDashboardStats.map((stat, index) => (
               <div
                 key={index}
                 className="bg-dark-card border border-dark-border rounded-xl p-6 hover:border-primary/50 transition-all group"
@@ -165,7 +91,7 @@ export default function DashboardPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={vulnerabilityData}
+                        data={mockVulnerabilityData}
                         cx="50%"
                         cy="50%"
                         innerRadius={70}
@@ -173,7 +99,7 @@ export default function DashboardPage() {
                         paddingAngle={5}
                         dataKey="value"
                       >
-                        {vulnerabilityData.map((entry, index) => (
+                        {mockVulnerabilityData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
@@ -185,7 +111,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div className="ml-8 space-y-3">
-                  {vulnerabilityData.map((item, index) => (
+                  {mockVulnerabilityData.map((item, index) => (
                     <div key={index} className="flex items-center space-x-3">
                       <div
                         className="w-3 h-3 rounded-full"
@@ -210,7 +136,7 @@ export default function DashboardPage() {
               </div>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trendData}>
+                  <AreaChart data={mockTrendData}>
                     <defs>
                       <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />
@@ -253,7 +179,7 @@ export default function DashboardPage() {
                 </button>
               </div>
               <div className="space-y-4">
-                {recentVulnerabilities.map((vuln, index) => (
+                {mockRecentVulnerabilities.map((vuln, index) => (
                   <div
                     key={index}
                     className="flex items-center justify-between p-4 bg-dark-bg rounded-lg hover:bg-dark-hover transition-colors group"

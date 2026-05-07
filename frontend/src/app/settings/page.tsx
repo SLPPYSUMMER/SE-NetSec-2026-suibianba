@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import { mockTeamMembers, mockAuditLogs } from '@/services/mockData';
 import {
   Users,
   FileText,
@@ -15,71 +16,6 @@ import {
   AlertTriangle,
   CheckCircle2,
 } from 'lucide-react';
-
-const teamMembers = [
-  {
-    id: 1,
-    name: 'Chen.Wei',
-    email: 'wei.chen@secguard.io',
-    role: '管理员',
-    roleColor: 'bg-primary/10 text-primary',
-    lastActive: '最后活跃: 2分钟前',
-    avatar: 'C',
-  },
-  {
-    id: 2,
-    name: 'Li.Jianhua',
-    email: 'jianhua@secguard.io',
-    role: '安全专家',
-    roleColor: 'bg-cyan-500/10 text-cyan-400',
-    lastActive: '最后活跃: 5小时前',
-    avatar: 'L',
-  },
-  {
-    id: 3,
-    name: 'Zhang.Min',
-    email: 'min.zhang@dev.internal',
-    role: '开发人员',
-    roleColor: 'bg-green-500/10 text-green-400',
-    lastActive: '最后活跃: 昨天',
-    avatar: 'Z',
-  },
-];
-
-const auditLogs = [
-  {
-    user: 'Chen.Wei',
-    action: '更新节点防火墙策略',
-    ip: '192.168.1.164',
-    time: '2023-10-27 14:22:10',
-    icon: CheckCircle2,
-    iconColor: 'text-blue-500',
-  },
-  {
-    user: 'Li.Jianhua',
-    action: '导出漏洞扫描报告 #842',
-    ip: '10.0.42.12',
-    time: '2023-10-27 13:05:44',
-    icon: FileText,
-    iconColor: 'text-blue-500',
-  },
-  {
-    user: 'System',
-    action: '异常登录重试拦截',
-    ip: '213.44.11.2',
-    time: '2023-10-27 12:40:02',
-    icon: AlertTriangle,
-    iconColor: 'text-red-500',
-  },
-  {
-    user: 'Zhang.Min',
-    action: '重置 API Access Token',
-    ip: '192.168.1.156',
-    time: '2023-10-27 11:15:29',
-    icon: Shield,
-    iconColor: 'text-blue-500',
-  },
-];
 
 export default function SettingsPage() {
   const [twoFAEnabled, setTwoFAEnabled] = useState(true);
@@ -116,7 +52,7 @@ export default function SettingsPage() {
                 </p>
 
                 <div className="space-y-4">
-                  {teamMembers.map((member) => (
+                  {mockTeamMembers.map((member) => (
                     <div
                       key={member.id}
                       className="flex items-center justify-between p-4 bg-dark-bg rounded-lg hover:bg-dark-hover transition-colors group"
@@ -179,11 +115,11 @@ export default function SettingsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-dark-border bg-dark-bg">
-                      {auditLogs.map((log, index) => (
+                      {mockAuditLogs.map((log, index) => (
                         <tr key={index} className="hover:bg-dark-hover transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center space-x-2">
-                              <log.icon className={`w-4 h-4 ${log.iconColor}`} />
+                              {log.icon && <log.icon className={`w-4 h-4 ${log.iconColor}`} />}
                               <span className="text-sm font-medium text-white">
                                 {log.user}
                               </span>

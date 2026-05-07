@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import { mockAssets } from '@/services/mockData';
 import {
   Search,
   Filter,
@@ -25,87 +26,6 @@ import {
   Clock,
 } from 'lucide-react';
 
-const assets = [
-  {
-    id: 'AST-001',
-    name: 'auth-prod-v2-internal',
-    type: '服务器',
-    icon: Server,
-    ip: '192.168.1.100',
-    status: '在线',
-    statusColor: 'text-green-400',
-    vulnerabilities: 3,
-    lastScan: '2024-05-18',
-    criticality: '高',
-    criticalityColor: 'bg-red-500/20 text-red-400 border-red-500/30',
-  },
-  {
-    id: 'AST-002',
-    name: 'web-portal-public',
-    type: 'Web应用',
-    icon: Globe,
-    url: 'https://portal.example.com',
-    status: '在线',
-    statusColor: 'text-green-400',
-    vulnerabilities: 7,
-    lastScan: '2024-05-17',
-    criticality: '关键',
-    criticalityColor: 'bg-red-500/20 text-red-400 border-red-500/30',
-  },
-  {
-    id: 'AST-003',
-    name: 'db-master-cluster',
-    type: '数据库',
-    icon: Database,
-    ip: '10.0.0.50',
-    status: '在线',
-    statusColor: 'text-green-400',
-    vulnerabilities: 2,
-    lastScan: '2024-05-16',
-    criticality: '高',
-    criticalityColor: 'bg-red-500/20 text-red-400 border-red-500/30',
-  },
-  {
-    id: 'AST-004',
-    name: 'api-gateway-prod',
-    type: 'API服务',
-    icon: Cloud,
-    url: 'https://api.example.com',
-    status: '警告',
-    statusColor: 'text-yellow-400',
-    vulnerabilities: 12,
-    lastScan: '2024-05-15',
-    criticality: '关键',
-    criticalityColor: 'bg-red-500/20 text-red-400 border-red-500/30',
-  },
-  {
-    id: 'AST-005',
-    name: 'monitoring-dashboard',
-    type: 'Web应用',
-    icon: Monitor,
-    url: 'https://monitor.example.com',
-    status: '离线',
-    statusColor: 'text-red-400',
-    vulnerabilities: 0,
-    lastScan: '2024-05-10',
-    criticality: '中',
-    criticalityColor: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  },
-  {
-    id: 'AST-006',
-    name: 'mobile-app-backend',
-    type: 'API服务',
-    icon: Smartphone,
-    url: 'https://mapi.example.com',
-    status: '在线',
-    statusColor: 'text-green-400',
-    vulnerabilities: 5,
-    lastScan: '2024-05-14',
-    criticality: '中',
-    criticalityColor: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  },
-];
-
 const assetTypes = ['全部', '服务器', 'Web应用', '数据库', 'API服务'];
 const statuses = ['全部', '在线', '警告', '离线'];
 
@@ -114,7 +34,7 @@ export default function AssetsPage() {
   const [selectedStatus, setSelectedStatus] = useState('全部');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredAssets = assets.filter((asset) => {
+  const filteredAssets = mockAssets.filter((asset) => {
     const matchesType = selectedType === '全部' || asset.type === selectedType;
     const matchesStatus = selectedStatus === '全部' || asset.status === selectedStatus;
     const matchesSearch =
@@ -136,7 +56,7 @@ export default function AssetsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-400 mb-1">总资产数</p>
-                  <p className="text-3xl font-bold text-white">{assets.length}</p>
+                  <p className="text-3xl font-bold text-white">{mockAssets.length}</p>
                 </div>
                 <div className="w-12 h-12 bg-primary/20 rounded-lg flex items-center justify-center">
                   <Server className="w-6 h-6 text-primary" />
@@ -149,7 +69,7 @@ export default function AssetsPage() {
                 <div>
                   <p className="text-sm text-gray-400 mb-1">在线资产</p>
                   <p className="text-3xl font-bold text-green-400">
-                    {assets.filter((a) => a.status === '在线').length}
+                    {mockAssets.filter((a) => a.status === '在线').length}
                   </p>
                 </div>
                 <div className="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
@@ -163,7 +83,7 @@ export default function AssetsPage() {
                 <div>
                   <p className="text-sm text-gray-400 mb-1">存在漏洞</p>
                   <p className="text-3xl font-bold text-yellow-400">
-                    {assets.filter((a) => a.vulnerabilities > 0).length}
+                    {mockAssets.filter((a) => a.vulnerabilities > 0).length}
                   </p>
                 </div>
                 <div className="w-12 h-12 bg-yellow-500/20 rounded-lg flex items-center justify-center">
@@ -177,7 +97,7 @@ export default function AssetsPage() {
                 <div>
                   <p className="text-sm text-gray-400 mb-1">高危资产</p>
                   <p className="text-3xl font-bold text-red-400">
-                    {assets.filter(
+                    {mockAssets.filter(
                       (a) => a.criticality === '关键' || a.criticality === '高'
                     ).length}
                   </p>
@@ -280,7 +200,11 @@ export default function AssetsPage() {
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
-                          <asset.icon className="w-5 h-5 text-primary" />
+                          {asset.icon ? (
+                            <asset.icon className="w-5 h-5 text-primary" />
+                          ) : (
+                            <Server className="w-5 h-5 text-primary" />
+                          )}
                         </div>
                         <div>
                           <p className="text-sm font-medium text-white">{asset.name}</p>
@@ -365,7 +289,7 @@ export default function AssetsPage() {
           {/* 分页 */}
           <div className="mt-6 flex items-center justify-between">
             <p className="text-sm text-gray-400">
-              显示 {filteredAssets.length} 个资产，共 {assets.length} 个
+              显示 {filteredAssets.length} 个资产，共 {mockAssets.length} 个
             </p>
             <div className="flex items-center space-x-2">
               <button className="px-3 py-1.5 bg-dark-hover text-gray-400 rounded-lg hover:text-white disabled:opacity-50">

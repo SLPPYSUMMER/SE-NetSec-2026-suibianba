@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import { mockVulnerabilities } from '@/services/mockData';
 import {
   Search,
   Filter,
@@ -14,53 +15,6 @@ import {
   ChevronRight,
   MoreVertical,
 } from 'lucide-react';
-
-const vulnerabilities = [
-  {
-    id: 'VUL-2024-0812',
-    title: '核心鉴权组件拒绝服务漏洞 (RCE)',
-    description: 'Asset auth-prod-v2-internal',
-    severity: '关键',
-    severityColor: 'bg-red-500',
-    status: '待分派',
-    statusColor: 'text-red-400',
-    assignee: '张景瑞',
-    date: '2024-05-18',
-  },
-  {
-    id: 'VUL-2024-0792',
-    title: 'API Gateway 配置不当导致信息泄露',
-    description: 'Asset api-gw-public',
-    severity: '高危',
-    severityColor: 'bg-orange-500',
-    status: '处理中',
-    statusColor: 'text-yellow-400',
-    assignee: '李伟',
-    date: '2024-05-17',
-  },
-  {
-    id: 'VUL-2024-0751',
-    title: '数据库连接池超时配置失效',
-    description: 'Asset db-cluster-01',
-    severity: '中危',
-    severityColor: 'bg-yellow-500',
-    status: '已修复',
-    statusColor: 'text-cyan-400',
-    assignee: '周通',
-    date: '2024-05-15',
-  },
-  {
-    id: 'VUL-2024-0610',
-    title: '第三方库 Iodash 版本过低安全预警',
-    description: 'Asset frontend-dashboard',
-    severity: '低危',
-    severityColor: 'bg-gray-500',
-    status: '已关闭',
-    statusColor: 'text-green-400',
-    assignee: '孔凡',
-    date: '2024-05-10',
-  },
-];
 
 export default function VulnerabilitiesPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -161,7 +115,7 @@ export default function VulnerabilitiesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-dark-border">
-                {vulnerabilities.map((vuln, index) => (
+                {mockVulnerabilities.map((vuln, index) => (
                   <tr
                     key={index}
                     className="hover:bg-dark-hover transition-colors group"
