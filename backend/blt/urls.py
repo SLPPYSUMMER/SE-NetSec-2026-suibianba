@@ -1267,3 +1267,21 @@ if settings.DEBUG:
     ] + urlpatterns
 
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# ==============================================================================
+# SecGuard API - Django Ninja 路由配置
+# ==============================================================================
+from ninja import NinjaAPI
+from website.api.secguard_api import router as secguard_router
+
+secguard_api = NinjaAPI(
+    title="SecGuard Vulnerability Management API",
+    version="1.0.0",
+    description="SecGuard 漏洞管理平台 API - 基于OWASP BLT二次开发",
+    docs_url="/secguard/docs",
+)
+
+secguard_api.add_router("/secguard", secguard_router)
+urlpatterns += [
+    path("api/", secguard_api.urls),
+]

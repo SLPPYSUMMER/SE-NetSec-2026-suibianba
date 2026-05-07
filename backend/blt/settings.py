@@ -104,6 +104,7 @@ INSTALLED_APPS = (
     "dj_rest_auth.registration",
     "storages",
     "channels",
+    "ninja",
 )
 
 if DEBUG:
