@@ -1,0 +1,108 @@
+@startuml 类图
+title SecGuard漏洞管理平台 - 核心领域模型
+
+' 定义枚举类型
+enum Role {
+    ADMIN
+    SECURITY_ANALYST
+    USER
+}
+
+enum Severity {
+    CRITICAL
+    HIGH
+    MEDIUM
+    LOW
+}
+
+enum Status {
+    PENDING
+    IN_PROGRESS
+    RESOLVED
+    CLOSED
+}
+
+enum TaskStatus {
+    PENDING
+    RUNNING
+    COMPLETED
+    FAILED
+    CANCELLED
+}
+
+' 定义核心类
+class User {
+    -id: UUID <<PK>>
+    -username: str
+    -email: str
+    -password_hash: str
+    -role: Role
+    -created_at: datetime
+    -last_login: datetime
+    +get_full_name(): str
+    +has_permission(permission: str): bool
+    +update_password(new_password: str): void
+}
+
+class Vulnerability {
+    -id: UUID <<PK>>
+    -title: str
+    -description: str
+    -severity: Severity
+    -status: Status
+    -cve_id: str
+    -cvss_score: float
+    -discovered_by: User <<FK>>
+    -scan_task: ScanTask <<FK>>
+    -created_at: datetime
+    -updated_at: datetime
+    +get_risk_score(): float
+    +update_status(new_status: Status): void
+    +add_comment(comment: str): void
+}
+
+class ScanTask {
+    -id: UUID <<PK>>
+    -target: str
+    -scan_type: str
+    -status: TaskStatus
+    -progress: int
+    -created_by: User <<FK>>
+    -created_at: datetime
+    -completed_at: datetime
+    +start(): void
+    +cancel(): void
+    +get_progress_percent(): float
+    +add_result(vulnerability: Vulnerability): void
+}
+
+class Report {
+    -id: UUID <<PK>>
+    -scan_task: ScanTask <<FK>>
+    -content: str
+    -format: str
+    -generated_at: datetime
+    +generate(): bytes
+    +export_to_file(path: str): void
+    +get_summary(): dict
+}
+
+class Comment {
+    -id: UUID <<PK>>
+    -vulnerability: Vulnerability <<FK>>
+    -author: User <<FK>>
+    -content: str
+    -created_at: datetime
+    +edit(new_content: str): void
+}
+
+' 定义关系
+User "1" --> "*" Vulnerability : discovers
+User "1" --> "*" ScanTask : creates
+User "1" --> "*" Report : generates
+User "1" --> "*" Comment : writes
+ScanTask "1" --> "*" Vulnerability : finds
+ScanTask "1" --> "1" Report : generates
+Vulnerability "1" --> "*" Comment : has
+
+@enduml

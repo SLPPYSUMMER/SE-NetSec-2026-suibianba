@@ -1,0 +1,69 @@
+@startuml 组件图
+title SecGuard漏洞管理平台 - 模块划分
+
+' 定义组件
+package "用户服务" as UserService {
+    component 认证控制器 as AuthController
+    component 权限服务 as PermissionService
+    component 用户Repository as UserRepo
+}
+
+package "扫描服务" as ScanService {
+    component 扫描控制器 as ScanController
+    component 扫描引擎 as ScanEngine
+    component Nettacker集成 as Nettacker
+    component 任务队列服务 as TaskQueue
+}
+
+package "漏洞服务" as VulnService {
+    component 漏洞控制器 as VulnController
+    component 漏洞分析引擎 as VulnAnalyzer
+    component 风险评估服务 as RiskService
+    component 漏洞Repository as VulnRepo
+}
+
+package "报告服务" as ReportService {
+    component 报告控制器 as ReportController
+    component PDF生成器 as PDFGenerator
+    component HTML模板引擎 as TemplateEngine
+    component 报告Repository as ReportRepo
+}
+
+package "通知服务" as NotifyService {
+    component 消息控制器 as NotifyController
+    component WebSocket服务 as WSService
+    component 邮件发送器 as EmailSender
+}
+
+package "数据层" as DataLayer {
+    database PostgreSQL as DB
+    database Redis as Cache
+}
+
+' 连接关系
+UserService --> VulnService : 权限校验
+UserService --> ScanService : 用户认证
+ScanService --> VulnService : 漏洞数据写入
+ScanService --> NotifyService : 扫描完成通知
+VulnService --> ReportService : 漏洞详情查询
+ReportService --> NotifyService : 报告生成通知
+
+UserService --> DataLayer : 数据访问
+ScanService --> DataLayer : 数据访问
+VulnService --> DataLayer : 数据访问
+ReportService --> DataLayer : 数据访问
+
+' 标注通信方式
+note left of UserService
+  通信方式：REST API / JWT
+end note
+
+note bottom of ScanService
+  通信方式：REST API / RabbitMQ
+end note
+
+note right of VulnService
+  通信方式：REST API / SQL
+end note
+
+@enduml
