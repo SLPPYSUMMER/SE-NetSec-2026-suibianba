@@ -13,6 +13,7 @@ SecGuard API - 基于 Django Ninja 的漏洞管理平台接口
 """
 
 from ninja import Router
+from ninja.errors import HttpError
 from ninja.security import django_auth
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any
@@ -96,7 +97,7 @@ class ReportCreateSchema(BaseModel):
     def validate_severity(cls, v):
         allowed = ['critical', 'high', 'medium', 'low']
         if v not in allowed:
-            raise ValueError(f"严重程度必须是: {', '.join(allowed)}")
+            raise HttpError(400, f"严重程度必须是: {', '.join(allowed)}")
         return v
 
     @validator('affected_url')
@@ -164,7 +165,7 @@ class StatusTransitionSchema(BaseModel):
     def validate_action(cls, v):
         allowed = ['submit_fix', 'confirm_review', 'close', 'reopen']
         if v not in allowed:
-            raise ValueError(f"操作类型必须是: {', '.join(allowed)}")
+            raise HttpError(400, f"操作类型必须是: {', '.join(allowed)}")
         return v
 
 
@@ -266,12 +267,21 @@ def check_permission(user, required_role: str = None) -> bool:
 
 def get_user_team(request: HttpRequest):
     """
-    获取当前用户的团队 Organization 对象。
+    获取当前用户的主团队（根据 UserProfile.team 决定）。
     系统管理员 (is_staff) 可跨团队访问。
     返回 (team, membership) 元组，若未加入团队则返回 (None, None)。
     """
     if not request.user.is_authenticated or not hasattr(request.user, 'userprofile'):
         return None, None
+    profile = request.user.userprofile
+    if profile.team:
+        membership = TeamMembership.objects.filter(
+            user=request.user, team=profile.team,
+            status=TeamMembership.Status.ACCEPTED,
+        ).select_related('team').first()
+        if membership:
+            return membership.team, membership
+    # fallback: any accepted team
     membership = TeamMembership.objects.filter(
         user=request.user,
         status=TeamMembership.Status.ACCEPTED,
@@ -285,7 +295,7 @@ def require_team(request: HttpRequest):
     """获取团队，若未加入团队则抛异常"""
     team, membership = get_user_team(request)
     if team is None:
-        raise ValueError("您尚未加入任何团队，请先创建或加入团队")
+        raise HttpError(400, "您尚未加入任何团队，请先创建或加入团队")
     return team, membership
 
 
@@ -297,7 +307,7 @@ def require_team_role(request: HttpRequest, allowed_roles: list):
     if membership.role not in allowed_roles:
         role_labels = dict(TeamMembership.Role.choices)
         allowed_labels = [role_labels.get(r, r) for r in allowed_roles]
-        raise ValueError(f"需要{'/'.join(allowed_labels)}权限才能执行此操作")
+        raise HttpError(400, f"需要{'/'.join(allowed_labels)}权限才能执行此操作")
     return team, membership
 
 
@@ -400,10 +410,10 @@ def api_login(request: HttpRequest, payload: LoginSchema):
             detail=f"登录失败: 用户名或密码错误",
             request=request
         )
-        raise ValueError("用户名或密码错误")
+        raise HttpError(400, "用户名或密码错误")
 
     if not user.is_active:
-        raise ValueError("账户已被禁用，请联系管理员")
+        raise HttpError(400, "账户已被禁用，请联系管理员")
 
     login(request, user)
 
@@ -454,7 +464,7 @@ def api_get_current_user(request: HttpRequest):
     包含团队角色等用于前端权限渲染
     """
     if not request.user.is_authenticated:
-        raise ValueError("未登录或会话已过期")
+        raise HttpError(400, "未登录或会话已过期")
     team, membership = get_user_team(request)
     return {
         "id": request.user.id,
@@ -472,22 +482,13 @@ class RegisterSchema(BaseModel):
     username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
     email: Optional[str] = Field(None, description="邮箱（可选）")
-    team_action: Optional[str] = Field(None, description="团队操作: create 创建团队 / join 加入团队")
-    team_name: Optional[str] = Field(None, description="创建团队时的团队名称")
-    team_id: Optional[int] = Field(None, description="加入团队时的团队ID")
 
 
 @router.post("/auth/register", response=LoginResponse, auth=None)
 def api_register(request: HttpRequest, payload: RegisterSchema):
-    """
-    用户注册接口
-    支持三种模式：
-      - 不传 team_action：仅注册账户，稍后加入团队
-      - team_action=create + team_name：自动创建团队并设为团队管理员
-      - team_action=join + team_id：申请加入已有团队（待审核）
-    """
+    """用户注册接口"""
     if User.objects.filter(username=payload.username).exists():
-        raise ValueError("用户名已被注册，请更换用户名")
+        raise HttpError(400, "用户名已被注册，请更换用户名")
 
     user = User.objects.create_user(
         username=payload.username,
@@ -496,59 +497,16 @@ def api_register(request: HttpRequest, payload: RegisterSchema):
     )
     user.save()
 
-    # 确保 UserProfile 存在
     from website.models import UserProfile
-    profile, _ = UserProfile.objects.get_or_create(user=user)
-
-    if payload.team_action == "create" and payload.team_name:
-        existing = Organization.objects.filter(name=payload.team_name, type="team").first()
-        if existing:
-            raise ValueError(f"团队名称 '{payload.team_name}' 已被使用，请更换名称")
-        team = Organization.objects.create(
-            name=payload.team_name,
-            type="team",
-            admin=user,
-        )
-        TeamMembership.objects.create(
-            user=user,
-            team=team,
-            role=TeamMembership.Role.ADMIN,
-            status=TeamMembership.Status.ACCEPTED,
-        )
-        profile.team = team
-        profile.role = "admin"
-        profile.save()
-
-    elif payload.team_action == "join" and payload.team_id:
-        team = Organization.objects.filter(id=payload.team_id, type="team").first()
-        if not team:
-            raise ValueError("指定的团队不存在")
-        already = TeamMembership.objects.filter(user=user, team=team).first()
-        if already:
-            raise ValueError("您已申请过该团队，请等待审核")
-        TeamMembership.objects.create(
-            user=user,
-            team=team,
-            role=TeamMembership.Role.DEVELOPER,
-            status=TeamMembership.Status.PENDING,
-        )
+    UserProfile.objects.get_or_create(user=user)
 
     create_audit_log(
-        user=user,
-        action='REGISTER_SUCCESS',
-        target_type='User',
-        target_id=str(user.id),
-        detail=f"新用户注册: {user.username} (IP: {get_client_ip(request)})",
+        user=user, action='REGISTER_SUCCESS', target_type='User',
+        target_id=str(user.id), detail=f"新用户注册: {user.username}",
         request=request
     )
 
-    return LoginResponse(
-        success=True,
-        message="注册成功，请登录",
-        user_id=user.id,
-        username=user.username,
-        is_staff=user.is_staff
-    )
+    return LoginResponse(success=True, message="注册成功，请登录", user_id=user.id, username=user.username, is_staff=user.is_staff)
 
 
 @router.get("/auth/check", auth=None)
@@ -609,26 +567,26 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
       7. 返回完整报告详情
     """
     if not request.user.is_authenticated:
-        raise ValueError("请先登录后提交漏洞报告")
+        raise HttpError(400, "请先登录后提交漏洞报告")
 
     if not payload.title.strip():
-        raise ValueError("请输入漏洞标题")
+        raise HttpError(400, "请输入漏洞标题")
     if not payload.description.strip():
-        raise ValueError("请输入漏洞描述")
+        raise HttpError(400, "请输入漏洞描述")
     if len(payload.description.strip()) < 10:
-        raise ValueError("漏洞描述至少需要10个字符")
+        raise HttpError(400, "漏洞描述至少需要10个字符")
 
     try:
         project = Project.objects.get(id=payload.project_id)
     except Project.DoesNotExist:
-        raise ValueError(f"项目ID {payload.project_id} 不存在，请选择有效的项目")
+        raise HttpError(400, f"项目ID {payload.project_id} 不存在，请选择有效的项目")
 
     assignee = None
     if payload.assignee_id:
         try:
             assignee = User.objects.get(id=payload.assignee_id)
         except User.DoesNotExist:
-            raise ValueError("指定的处理人不存在")
+            raise HttpError(400, "指定的处理人不存在")
 
     duplicate_result = check_report_duplicates(
         title=payload.title,
@@ -752,6 +710,7 @@ def get_report_detail(request: HttpRequest, vuln_id: str):
       - 审计日志入口
     """
     try:
+        from django.db.models import F
         report = (
             Report.objects
             .select_related('reporter', 'assignee', 'project')
@@ -763,7 +722,7 @@ def get_report_detail(request: HttpRequest, vuln_id: str):
             .get(vuln_id=vuln_id)
         )
     except Report.DoesNotExist:
-        raise ValueError(f"漏洞报告 {vuln_id} 不存在或已被删除")
+        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在或已被删除")
 
     return annotate_report(report)
 
@@ -779,15 +738,15 @@ def update_report(request: HttpRequest, vuln_id: str, payload: ReportUpdateSchem
       - 其他人无权修改
     """
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
 
     try:
         report = Report.objects.get(vuln_id=vuln_id)
     except Report.DoesNotExist:
-        raise ValueError(f"漏洞报告 {vuln_id} 不存在")
+        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
 
     if report.reporter != request.user and not request.user.is_staff:
-        raise ValueError("只有上报人或管理员可以修改此漏洞报告")
+        raise HttpError(400, "只有上报人或管理员可以修改此漏洞报告")
 
     update_data = payload.model_dump(exclude_unset=True)
 
@@ -826,15 +785,15 @@ def assign_report(request: HttpRequest, vuln_id: str, payload: AssignReportSchem
     权限要求：项目经理 / 管理员
     """
     if not check_permission(request.user, 'manager'):
-        raise ValueError("需要项目经理或管理员权限才能分派漏洞")
+        raise HttpError(400, "需要项目经理或管理员权限才能分派漏洞")
 
     try:
         report = Report.objects.select_related('assignee').get(vuln_id=vuln_id)
     except Report.DoesNotExist:
-        raise ValueError(f"漏洞报告 {vuln_id} 不存在")
+        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
 
     if report.status not in [Report.Status.PENDING, Report.Status.PROCESSING]:
-        raise ValueError(
+        raise HttpError(400, 
             f"当前状态 '{report.get_status_display()}' 不允许分派操作，"
             f"仅允许在 '待分派' 或 '处理中' 状态下分派"
         )
@@ -842,7 +801,7 @@ def assign_report(request: HttpRequest, vuln_id: str, payload: AssignReportSchem
     try:
         assignee = User.objects.get(id=payload.assignee_id)
     except User.DoesNotExist:
-        raise ValueError(f"被分派的用户ID {payload.assignee_id} 不存在")
+        raise HttpError(400, f"被分派的用户ID {payload.assignee_id} 不存在")
 
     old_assignee = report.assignee.username if report.assignee else "未分配"
     report.assignee = assignee
@@ -884,12 +843,12 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
       reopen         → 项目经理(manager) 或 管理员(admin)
     """
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
 
     try:
         report = Report.objects.get(vuln_id=vuln_id)
     except Report.DoesNotExist:
-        raise ValueError(f"漏洞报告 {vuln_id} 不存在")
+        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
 
     valid_actions = {
         'submit_fix': {
@@ -923,7 +882,7 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
     }
 
     if payload.action not in valid_actions:
-        raise ValueError(
+        raise HttpError(400, 
             f"无效的操作类型: {payload.action}\n"
             f"允许的操作: {', '.join(valid_actions.keys())}"
         )
@@ -933,7 +892,7 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
     if report.status not in action_config['from_status']:
         current_status_display = report.get_status_display()
         allowed_from = [Report(s=s).get_status_display() for s in action_config['from_status']]
-        raise ValueError(
+        raise HttpError(400, 
             f"当前状态 '{current_status_display}' 不允许执行 '{action_config['action_name']}' 操作\n"
             f"允许的起始状态: {', '.join(allowed_from)}"
         )
@@ -951,7 +910,7 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
         is_allowed = True
 
     if not is_allowed:
-        raise ValueError(
+        raise HttpError(400, 
             f"您没有权限执行 '{action_config['action_name']}' 操作\n"
             f"需要角色: {', '.join(role_check)}"
         )
@@ -996,7 +955,7 @@ def get_report_audit_logs(
       - 安全合规审计
     """
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
 
     logs = (
         AuditLog.objects
@@ -1027,8 +986,8 @@ def list_audit_logs(
       - 异常行为检测
       - 合规报表生成
     """
-    if not request.user.is_staff:
-        raise ValueError("需要管理员权限才能查看全局审计日志")
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
 
     queryset = AuditLog.objects.all()
     queryset = filter_by_team(queryset, request)
@@ -1062,42 +1021,20 @@ def list_audit_logs(
 
 @router.get("/statistics/overview")
 def api_statistics_overview(request: HttpRequest):
-    """
-    获取平台统计数据概览
-
-    用于 Dashboard 首页展示：
-      - 漏洞总数、各状态分布
-      - 严重程度统计
-      - 近期趋势数据
-      - 待处理任务数量
-    """
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
 
-    total_reports = Report.objects.count()
+    qs = filter_by_team(Report.objects, request)
 
-    status_stats = (
-        Report.objects
-        .values('status')
-        .annotate(count=models.Count('pk'))
-        .order_by('-count')
-    )
+    total_reports = qs.count()
+    status_stats = qs.values('status').annotate(count=models.Count('pk')).order_by('-count')
+    severity_stats = qs.values('severity').annotate(count=models.Count('pk')).order_by('-count')
+    pending_count = qs.filter(status=Report.Status.PENDING).count()
+    processing_count = qs.filter(status=Report.Status.PROCESSING).count()
+    fixed_count = qs.filter(status=Report.Status.FIXED).count()
+    closed_count = qs.filter(status=Report.Status.CLOSED).count()
 
-    severity_stats = (
-        Report.objects
-        .values('severity')
-        .annotate(count=models.Count('pk'))
-        .order_by('-count')
-    )
-
-    pending_count = Report.objects.filter(status=Report.Status.PENDING).count()
-    processing_count = Report.objects.filter(status=Report.Status.PROCESSING).count()
-
-    recent_reports = (
-        Report.objects
-        .select_related('reporter', 'assignee')
-        .order_by('-created_at')[:5]
-    )
+    recent_reports = qs.select_related('reporter', 'assignee').order_by('-created_at')[:5]
 
     return {
         'total_reports': total_reports,
@@ -1105,14 +1042,9 @@ def api_statistics_overview(request: HttpRequest):
         'severity_distribution': list(severity_stats),
         'pending_count': pending_count,
         'processing_count': processing_count,
+        'fixed_count': fixed_count,
         'recent_reports': [
-            {
-                'vuln_id': r.vuln_id,
-                'title': r.title,
-                'status': r.status,
-                'severity': r.severity,
-                'created_at': r.created_at.isoformat()
-            }
+            {'vuln_id': r.vuln_id, 'title': r.title, 'status': r.status, 'severity': r.severity, 'created_at': r.created_at.isoformat()}
             for r in recent_reports
         ],
         'timestamp': datetime.now().isoformat()
@@ -1122,13 +1054,13 @@ def api_statistics_overview(request: HttpRequest):
 @router.delete("/reports/{vuln_id}")
 def delete_report(request: HttpRequest, vuln_id: str):
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
     try:
         report = Report.objects.get(vuln_id=vuln_id)
     except Report.DoesNotExist:
-        raise ValueError(f"漏洞报告 {vuln_id} 不存在")
+        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
     if report.reporter != request.user and not request.user.is_staff:
-        raise ValueError("只有上报人或管理员可以删除此漏洞报告")
+        raise HttpError(400, "只有上报人或管理员可以删除此漏洞报告")
     report.delete()
     create_audit_log(user=request.user, action='DELETE_REPORT', target_type='Report',
                      target_id=vuln_id, detail=f"删除漏洞报告 {vuln_id}", request=request)
@@ -1197,7 +1129,7 @@ def list_scans(
 @router.post("/scans")
 def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
     task = ScanTask.objects.create(
         name=payload.name or f"Scan_{payload.target}_{datetime.now().strftime('%Y%m%d%H%M')}",
         target=payload.target,
@@ -1225,7 +1157,7 @@ class ExportSchema(BaseModel):
 @router.post("/reports-export", auth=None)
 def export_reports(request: HttpRequest, payload: ExportSchema):
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
 
     queryset = Report.objects.all()
     queryset = filter_by_team(queryset, request)
@@ -1287,11 +1219,12 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
 
     if payload.format == "html":
         resp = HttpResponse(html, content_type="text/html; charset=utf-8")
-        resp["Content-Disposition"] = f'attachment; filename="secguard-report-{datetime.now().strftime("%Y%m%d")}.html"'
+        resp["Content-Disposition"] = f'attachment; filename="secguard-report-html-{datetime.now().strftime("%Y%m%d")}.html"'
         return resp
     elif payload.format == "pdf":
-        resp = HttpResponse(html, content_type="text/html; charset=utf-8")
-        resp["Content-Disposition"] = f'attachment; filename="secguard-report-{datetime.now().strftime("%Y%m%d")}.html"'
+        pdf_html = html.replace('<h1>', '<h1><small style="color:#94a3b8;">[PDF 报告 — 请使用 Ctrl+P 打印为 PDF]</small> ')
+        resp = HttpResponse(pdf_html, content_type="text/html; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="secguard-report-pdf-{datetime.now().strftime("%Y%m%d")}.html"'
         return resp
     else:
         items = []
@@ -1307,6 +1240,13 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
             "summary": {"total": total, "pending": pending, "processing": processing, "fixed": fixed, "reviewing": reviewing, "closed": closed, "fix_rate": fix_rate},
             "items": items,
         }
+
+
+# Asset endpoint
+@router.get("/assets")
+def list_assets(request: HttpRequest):
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
 
     if request.user.is_staff:
         scan_targets = ScanTask.objects.values('target').distinct()
@@ -1372,6 +1312,66 @@ class InviteSchema(BaseModel):
     username: str = Field(..., description="被邀请的用户名")
 
 
+class TeamCreateSchema(BaseModel):
+    name: str = Field(..., description="团队名称")
+
+
+class TeamJoinSchema(BaseModel):
+    team_id: int = Field(..., description="要加入的团队ID")
+
+
+@router.post("/teams/create")
+def team_create(request: HttpRequest, payload: TeamCreateSchema):
+    """创建新团队，创建者自动成为团队管理员"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    existing = Organization.objects.filter(name=payload.name, type="team").first()
+    if existing:
+        raise HttpError(400, f"团队名称 '{payload.name}' 已被使用")
+    import uuid
+    team = Organization.objects.create(
+        name=payload.name, type="team", admin=request.user,
+        url=f"team://{uuid.uuid4().hex[:12]}",
+        is_active=True,
+    )
+    TeamMembership.objects.create(
+        user=request.user, team=team,
+        role=TeamMembership.Role.ADMIN,
+        status=TeamMembership.Status.ACCEPTED,
+    )
+    profile = request.user.userprofile
+    if not profile.team:
+        profile.team = team
+        profile.role = "admin"
+        profile.save()
+
+    create_audit_log(user=request.user, action='TEAM_CREATED', target_type='Team',
+                     target_id=str(team.id), detail=f"创建团队 {team.name}", request=request)
+    return {"success": True, "team_id": team.id, "team_name": team.name, "message": "团队创建成功"}
+
+
+
+@router.post("/teams/join")
+def team_join(request: HttpRequest, payload: TeamJoinSchema):
+    """申请加入已有团队"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    team = Organization.objects.filter(id=payload.team_id, type="team").first()
+    if not team:
+        raise HttpError(400, "指定的团队不存在")
+    already = TeamMembership.objects.filter(user=request.user, team=team).first()
+    if already:
+        raise HttpError(400, "您已申请过该团队或已在团队中")
+    TeamMembership.objects.create(
+        user=request.user, team=team,
+        role=TeamMembership.Role.DEVELOPER,
+        status=TeamMembership.Status.PENDING,
+    )
+    create_audit_log(user=request.user, action='TEAM_JOIN_REQUEST', target_type='Team',
+                     target_id=str(team.id), detail=f"申请加入团队 {team.name}", request=request)
+    return {"success": True, "message": "申请已提交，请等待团队管理员审核"}
+
+
 class HandleMemberSchema(BaseModel):
     action: str = Field(..., description="approve / reject")
     role: Optional[str] = Field(None, description="赋予角色: admin/team_lead/developer/observer")
@@ -1381,7 +1381,7 @@ class HandleMemberSchema(BaseModel):
 def list_teams(request: HttpRequest, search: Optional[str] = Query(None)):
     """列出所有团队（用于注册时选择加入）"""
     if not request.user.is_authenticated:
-        raise ValueError("请先登录")
+        raise HttpError(400, "请先登录")
     qs = Organization.objects.filter(type="team")
     if search:
         qs = qs.filter(name__icontains=search)
@@ -1398,9 +1398,9 @@ def list_teams(request: HttpRequest, search: Optional[str] = Query(None)):
 
 @router.get("/teams/members")
 def list_team_members(request: HttpRequest):
-    """列出当前用户所在团队的所有成员"""
+    """列出当前用户所在团队的所有已通过成员"""
     team, membership = require_team(request)
-    ms = TeamMembership.objects.filter(team=team).select_related('user')
+    ms = TeamMembership.objects.filter(team=team, status=TeamMembership.Status.ACCEPTED).select_related('user')
     items = []
     for m in ms:
         items.append({
@@ -1441,7 +1441,7 @@ def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSch
     try:
         m = TeamMembership.objects.get(id=member_id, team=team)
     except TeamMembership.DoesNotExist:
-        raise ValueError("该申请不存在或不属于您的团队")
+        raise HttpError(400, "该申请不存在或不属于您的团队")
 
     if payload.action == "approve":
         m.status = TeamMembership.Status.ACCEPTED
@@ -1450,6 +1450,8 @@ def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSch
         if payload.role and payload.role in dict(TeamMembership.Role.choices):
             m.role = payload.role
         m.save()
+        create_audit_log(user=request.user, action='TEAM_APPROVED', target_type='Team',
+                         target_id=str(team.id), detail=f"通过了 {m.user.username} 的加入申请", request=request)
         return {"success": True, "message": f"已通过 {m.user.username} 的加入申请"}
 
     elif payload.action == "reject":
@@ -1457,13 +1459,15 @@ def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSch
         m.reviewed_by = request.user
         m.reviewed_at = datetime.now()
         m.save()
+        create_audit_log(user=request.user, action='TEAM_REJECTED', target_type='Team',
+                         target_id=str(team.id), detail=f"拒绝了 {m.user.username} 的加入申请", request=request)
         return {"success": True, "message": f"已拒绝 {m.user.username} 的加入申请"}
 
     elif payload.action == "change_role":
         if not payload.role:
-            raise ValueError("请指定新角色")
+            raise HttpError(400, "请指定新角色")
         if payload.role not in dict(TeamMembership.Role.choices):
-            raise ValueError("无效的角色类型")
+            raise HttpError(400, "无效的角色类型")
         m.role = payload.role
         profile = m.user.userprofile
         profile.role = payload.role
@@ -1471,28 +1475,152 @@ def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSch
         m.save()
         return {"success": True, "message": f"已将 {m.user.username} 的角色更改为 {m.get_role_display()}"}
 
-    raise ValueError("无效的操作，请使用 approve / reject / change_role")
+    raise HttpError(400, "无效的操作，请使用 approve / reject / change_role")
 
 
 @router.post("/teams/invite")
 def invite_member(request: HttpRequest, payload: InviteSchema):
-    """邀请用户加入团队"""
+    """邀请用户加入团队（需要被邀请人接受）"""
     team, membership = require_team_role(request, ["admin", "team_lead"])
     invited = User.objects.filter(username=payload.username).first()
     if not invited:
-        raise ValueError("用户不存在")
+        raise HttpError(400, "用户不存在")
     already = TeamMembership.objects.filter(user=invited, team=team).first()
     if already:
-        raise ValueError("该用户已在团队中或已申请加入")
+        raise HttpError(400, "该用户已在团队中或已申请加入")
     TeamMembership.objects.create(
-        user=invited,
-        team=team,
+        user=invited, team=team,
         role=TeamMembership.Role.DEVELOPER,
-        status=TeamMembership.Status.ACCEPTED,
-        reviewed_by=request.user,
-        reviewed_at=datetime.now(),
+        status=TeamMembership.Status.PENDING,
     )
-    return {"success": True, "message": f"已邀请 {invited.username} 加入团队"}
+    return {"success": True, "message": f"已邀请 {invited.username}，等待对方确认加入"}
+
+
+@router.post("/teams/members/{member_id}/kick")
+def kick_member(request: HttpRequest, member_id: int):
+    """踢出团队成员（仅团队管理员）"""
+    team, membership = require_team_role(request, ["admin"])
+    try:
+        m = TeamMembership.objects.get(id=member_id, team=team)
+    except TeamMembership.DoesNotExist:
+        raise HttpError(400, "该成员不存在")
+    if m.user == request.user:
+        raise HttpError(400, "不能踢出自己")
+    if m.role == "admin":
+        raise HttpError(400, "不能踢出团队管理员")
+    username = m.user.username
+    m.delete()
+    create_audit_log(user=request.user, action='TEAM_KICKED', target_type='Team',
+                     target_id=str(team.id), detail=f"将 {username} 移出团队", request=request)
+    return {"success": True, "message": f"已将 {username} 移出团队"}
+
+
+@router.post("/teams/accept-invite")
+def accept_invite(request: HttpRequest):
+    """用户接受团队邀请，加入但不改变当前活跃团队"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    m = TeamMembership.objects.filter(user=request.user, status=TeamMembership.Status.PENDING).first()
+    if not m:
+        raise HttpError(400, "没有待处理的团队邀请")
+    m.status = TeamMembership.Status.ACCEPTED
+    m.joined_at = datetime.now()
+    m.save()
+    profile = request.user.userprofile
+    # 仅当用户尚无团队时才设为活跃团队
+    if not profile.team:
+        profile.team = m.team
+        profile.role = m.role
+        profile.save()
+    create_audit_log(user=request.user, action='TEAM_ACCEPTED', target_type='Team',
+                     target_id=str(m.team.id), detail=f"接受了团队 {m.team.name} 的邀请", request=request)
+    return {"success": True, "message": f"已加入团队 {m.team.name}", "team_id": m.team.id}
+
+
+@router.post("/teams/decline-invite")
+def decline_invite(request: HttpRequest):
+    """用户拒绝团队邀请"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    m = TeamMembership.objects.filter(user=request.user, status=TeamMembership.Status.PENDING).first()
+    if not m:
+        raise HttpError(400, "没有待处理的团队邀请")
+    team_name = m.team.name
+    m.delete()
+    create_audit_log(user=request.user, action='TEAM_DECLINED', target_type='Team',
+                     target_id=str(m.team.id), detail=f"拒绝了团队 {team_name} 的邀请", request=request)
+    return {"success": True, "message": "已拒绝团队邀请"}
+
+
+@router.post("/teams/switch")
+def switch_team(request: HttpRequest):
+    """切换当前活跃团队"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    from pydantic import BaseModel as PydanticBase
+    class SwitchSchema(PydanticBase): team_id: int
+    import json
+    body = json.loads(request.body)
+    target_team_id = body.get('team_id', 0)
+    m = TeamMembership.objects.filter(
+        user=request.user, team_id=target_team_id,
+        status=TeamMembership.Status.ACCEPTED,
+    ).select_related('team').first()
+    if not m:
+        raise HttpError(400, "您不在此团队中或团队不存在")
+    profile = request.user.userprofile
+    profile.team = m.team
+    profile.role = m.role
+    profile.save()
+    return {"success": True, "message": f"已切换到团队 {m.team.name}", "team_id": m.team.id, "team_name": m.team.name}
+
+
+@router.get("/teams/my-teams")
+def my_teams(request: HttpRequest):
+    """列出当前用户所在的所有团队"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    ms = TeamMembership.objects.filter(
+        user=request.user, status=TeamMembership.Status.ACCEPTED,
+    ).select_related('team')
+    active_id = request.user.userprofile.team_id if hasattr(request.user, 'userprofile') else None
+    return {
+        "items": [
+            {"team_id": m.team.id, "team_name": m.team.name, "role": m.role, "role_label": m.get_role_display(), "is_active": m.team_id == active_id}
+            for m in ms
+        ]
+    }
+
+
+@router.get("/teams/pending-invitation")
+def check_pending_invitation(request: HttpRequest):
+    """检查当前用户是否有待处理的团队邀请"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    m = TeamMembership.objects.filter(user=request.user, status=TeamMembership.Status.PENDING).select_related('team').first()
+    if not m:
+        return {"has_pending": False}
+    return {"has_pending": True, "team_id": m.team.id, "team_name": m.team.name}
+
+
+# Admin: list all teams with members
+@router.get("/admin/teams-dashboard")
+def admin_teams_dashboard(request: HttpRequest):
+    if not request.user.is_staff:
+        raise HttpError(400, "需要超级管理员权限")
+    teams = Organization.objects.filter(type="team")
+    result = []
+    for t in teams:
+        ms = TeamMembership.objects.filter(team=t, status=TeamMembership.Status.ACCEPTED).select_related('user')
+        result.append({
+            "id": t.id, "name": t.name, "admin_name": t.admin.username if t.admin else None,
+            "members": [{"user_id": m.user.id, "username": m.user.username, "role": m.role, "role_label": m.get_role_display()} for m in ms],
+        })
+    # users without team
+    no_team = User.objects.filter(is_active=True).exclude(
+        id__in=TeamMembership.objects.filter(status=TeamMembership.Status.ACCEPTED).values('user_id')
+    ).values('id', 'username', 'email', 'is_staff')
+    return {"teams": result, "users_without_team": list(no_team)}
 
 
 import django.db.models as models

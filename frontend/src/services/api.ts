@@ -142,6 +142,18 @@ export const teamsApi = {
   pending: () => request<{ items: any[] }>('/teams/pending'),
   handleMember: (memberId: number, data: { action: string; role?: string }) =>
     request<any>(`/teams/members/${memberId}/handle`, { method: 'POST', body: JSON.stringify(data) }),
+  kick: (memberId: number) =>
+    request<any>(`/teams/members/${memberId}/kick`, { method: 'POST' }),
   invite: (username: string) =>
     request<any>('/teams/invite', { method: 'POST', body: JSON.stringify({ username }) }),
+  acceptInvite: () => request<any>('/teams/accept-invite', { method: 'POST' }),
+  declineInvite: () => request<any>('/teams/decline-invite', { method: 'POST' }),
+  pendingInvitation: () => request<{ has_pending: boolean; team_id?: number; team_name?: string }>('/teams/pending-invitation'),
+  myTeams: () => request<{ items: { team_id: number; team_name: string; role: string; role_label: string; is_active: boolean }[] }>('/teams/my-teams'),
+  switchTeam: (teamId: number) => request<any>('/teams/switch', { method: 'POST', body: JSON.stringify({ team_id: teamId }) }),
+  adminDashboard: () => request<{ teams: any[]; users_without_team: any[] }>('/admin/teams-dashboard'),
+  create: (name: string) =>
+    request<any>('/teams/create', { method: 'POST', body: JSON.stringify({ name }) }),
+  join: (teamId: number) =>
+    request<any>('/teams/join', { method: 'POST', body: JSON.stringify({ team_id: teamId }) }),
 };
