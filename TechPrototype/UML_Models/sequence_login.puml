@@ -1,0 +1,30 @@
+@startuml
+' 时序图 - 用户登录流程
+
+title 用户登录时序图
+
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+
+actor User as 用户
+participant Frontend as 前端
+participant Backend as 后端
+participant Redis as Redis缓存
+participant DB as PostgreSQL
+
+用户 -> Frontend: 输入用户名密码
+Frontend -> Backend: POST /api/auth/login
+Backend -> DB: SELECT * FROM users WHERE username = ?
+DB --> Backend: 用户记录
+Backend -> Backend: BCrypt验证密码
+alt 验证成功
+    Backend -> Backend: 生成JWT Token
+    Backend -> Redis: SET token:{user_id} = token (1小时过期)
+    Backend --> Frontend: 200 OK { token, user }
+    Frontend --> 用户: 登录成功，跳转首页
+else 验证失败
+    Backend --> Frontend: 401 Unauthorized { message }
+    Frontend --> 用户: 显示错误信息
+end
+
+@enduml

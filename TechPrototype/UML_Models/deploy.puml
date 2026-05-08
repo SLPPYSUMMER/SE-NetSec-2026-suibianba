@@ -1,0 +1,60 @@
+@startuml
+' 部署图 - SecGuard漏洞管理平台
+
+title SecGuard 系统部署图
+
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+
+' 云服务器
+node "云服务器 (ECS)" as ECS {
+    [Nginx\n反向代理] as nginx
+    [Next.js\n前端应用] as frontend
+    [Django\n后端应用] as backend
+    [Redis\n缓存] as redis
+}
+
+' 数据库服务器
+node "数据库服务器 (RDS)" as RDS {
+    [PostgreSQL\n主数据库] as postgres
+}
+
+' 消息队列服务器
+node "消息队列服务器" as MQ {
+    [RabbitMQ\n消息队列] as rabbitmq
+    [Celery\nWorker] as celery
+}
+
+' 扫描工具服务器
+node "扫描工具服务器" as Scanner {
+    [Nettacker\n安全扫描器] as nettacker
+}
+
+' 用户
+actor "用户" as user
+actor "管理员" as admin
+
+' 连接关系
+user --> nginx
+admin --> nginx
+nginx --> frontend
+nginx --> backend
+backend --> postgres
+backend --> redis
+backend --> rabbitmq
+celery --> rabbitmq
+celery --> postgres
+nettacker --> rabbitmq
+
+' 注释
+note bottom of nginx
+  监听端口: 80/443
+  SSL证书配置
+end note
+
+note bottom of postgres
+  数据库端口: 5432
+  主从复制配置
+end note
+
+@enduml

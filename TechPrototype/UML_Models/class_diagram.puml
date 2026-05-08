@@ -1,0 +1,135 @@
+@startuml
+' 类图 - SecGuard核心领域模型
+
+title SecGuard 核心类图
+
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam class {
+    BackgroundColor #F5F5F5
+    BorderColor #2E7D32
+    ArrowColor #2E7D32
+}
+
+' 用户类
+class User {
+    +id: int
+    +username: string
+    +email: string
+    +password_hash: string
+    +role: enum
+    +created_at: datetime
+    +last_login: datetime
+    +login(credentials): User
+    +logout(): void
+    +has_permission(permission): bool
+}
+
+' 团队类
+class Team {
+    +id: int
+    +name: string
+    +description: string
+    +created_by_id: int
+    +created_at: datetime
+    +add_member(user): void
+    +remove_member(user): void
+}
+
+' 项目类
+class Project {
+    +id: int
+    +name: string
+    +description: string
+    +owner_id: int
+    +created_at: datetime
+    +updated_at: datetime
+    +create_report(data): Report
+    +get_stats(): dict
+}
+
+' 漏洞报告类
+class Report {
+    +id: int
+    +title: string
+    +description: text
+    +severity: enum
+    +status: enum
+    +reporter_id: int
+    +assignee_id: int
+    +project_id: int
+    +created_at: datetime
+    +updated_at: datetime
+    +submit(): void
+    +assign(user): void
+    +update_status(status): void
+    +close(): void
+}
+
+' 扫描任务类
+class ScanTask {
+    +id: int
+    +name: string
+    +target: string
+    +status: enum
+    +scanner_type: string
+    +created_by_id: int
+    +started_at: datetime
+    +finished_at: datetime
+    +start(): void
+    +stop(): void
+    +import_results(results): void
+}
+
+' 漏洞信息类
+class Vulnerability {
+    +id: int
+    +cve_id: string
+    +title: string
+    +description: text
+    +solution: text
+    +cvss_score: float
+    +severity: enum
+    +scan_task_id: int
+    +report_id: int
+    +validate(): bool
+    +export(): dict
+}
+
+' 通知类
+class Notification {
+    +id: int
+    +recipient_id: int
+    +type: enum
+    +content: text
+    +is_read: bool
+    +created_at: datetime
+    +send(): void
+    +mark_as_read(): void
+}
+
+' 审计日志类
+class AuditLog {
+    +id: int
+    +user_id: int
+    +action: enum
+    +target_type: string
+    +target_id: int
+    +ip_address: string
+    +timestamp: datetime
+    +record(user, action, target): void
+}
+
+' 关系定义
+User "1" -- "many" Report : submits
+User "1" -- "many" Report : assigns
+User "1" -- "many" ScanTask : creates
+User "1" -- "many" Notification : receives
+User "1" -- "many" AuditLog : generates
+Team "1" -- "many" User : has
+Team "1" -- "many" Project : owns
+Project "1" -- "many" Report : contains
+ScanTask "1" -- "many" Vulnerability : discovers
+Vulnerability "0..1" -- "1" Report : relates_to
+
+@enduml
