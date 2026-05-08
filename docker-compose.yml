@@ -1,4 +1,4 @@
-﻿services:
+services:
   db:
     image: postgres:17.6
     ports:
@@ -35,6 +35,20 @@
       - POSTGRES_PASSWORD=postgres
     command: poetry run python manage.py runserver 0.0.0.0:8000
     tty: true
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://app:8000
+    depends_on:
+      - app
+    container_name: secguard-frontend
+    restart: on-failure
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://app:8000
 
 volumes:
   postgres_db:

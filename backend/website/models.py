@@ -3830,6 +3830,11 @@ class Report(models.Model):
         help_text="所属项目",
     )
 
+    # ---- 附加信息 ----
+    cve_id = models.CharField(max_length=50, blank=True, default="", help_text="CVE编号")
+    affected_url = models.URLField(max_length=500, blank=True, default="", help_text="受影响URL")
+    reproduction_steps = models.TextField(blank=True, default="", help_text="复现步骤")
+
     # ---- 时间戳 ----
     created_at = models.DateTimeField(auto_now_add=True, help_text="上报时间")
     updated_at = models.DateTimeField(auto_now=True, help_text="最后更新时间")
