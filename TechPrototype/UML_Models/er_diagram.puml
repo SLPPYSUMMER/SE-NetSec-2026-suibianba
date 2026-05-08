@@ -1,0 +1,69 @@
+@startuml ER图
+title SecGuard漏洞管理平台 - 数据库实体关系图
+
+' 定义实体
+entity 用户 as User {
+    *用户ID: UUID <<PK>>
+    --
+    用户名: VARCHAR(50) <<UK>>
+    邮箱: VARCHAR(100) <<UK>>
+    密码哈希: VARCHAR(255)
+    角色: ENUM
+    创建时间: DATETIME
+}
+
+entity 漏洞 as Vulnerability {
+    *漏洞ID: UUID <<PK>>
+    --
+    标题: VARCHAR(200)
+    描述: TEXT
+    严重级别: ENUM
+    状态: ENUM
+    CVE编号: VARCHAR(20)
+    CVSS评分: FLOAT
+    发现者ID: UUID <<FK>>
+    扫描任务ID: UUID <<FK>>
+    创建时间: DATETIME
+    更新时间: DATETIME
+}
+
+entity 扫描任务 as ScanTask {
+    *任务ID: UUID <<PK>>
+    --
+    目标地址: VARCHAR(255)
+    扫描类型: VARCHAR(50)
+    状态: ENUM
+    进度: INTEGER
+    创建者ID: UUID <<FK>>
+    创建时间: DATETIME
+    完成时间: DATETIME
+}
+
+entity 报告 as Report {
+    *报告ID: UUID <<PK>>
+    --
+    任务ID: UUID <<FK>>
+    内容: TEXT
+    格式: ENUM
+    生成时间: DATETIME
+}
+
+entity 评论 as Comment {
+    *评论ID: UUID <<PK>>
+    --
+    漏洞ID: UUID <<FK>>
+    用户ID: UUID <<FK>>
+    内容: TEXT
+    创建时间: DATETIME
+}
+
+' 定义关系
+User ||--o{ Vulnerability : 发现
+User ||--o{ ScanTask : 创建
+User ||--o{ Report : 生成
+User ||--o{ Comment : 发表
+ScanTask ||--o{ Vulnerability : 包含
+ScanTask ||--|| Report : 生成
+Vulnerability ||--o{ Comment : 拥有
+
+@enduml

@@ -1,0 +1,44 @@
+@startuml 扫描时序图
+title 用户发起漏洞扫描
+
+actor 用户 as User
+participant 前端 as Frontend
+participant API网关 as APIGateway
+participant 认证服务 as AuthService
+participant 扫描服务 as ScanService
+participant RabbitMQ as RabbitMQ
+participant CeleryWorker as CeleryWorker
+participant Nettacker as Nettacker
+participant PostgreSQL as PostgreSQL
+participant WebSocket as WebSocket
+
+== 用户认证 ==
+User -> Frontend: 点击"发起扫描"
+Frontend -> Frontend: 获取JWT Token
+Frontend -> APIGateway: POST /api/scans (token, target, type)
+APIGateway -> AuthService: 验证Token
+AuthService -> PostgreSQL: 查询用户
+PostgreSQL --> AuthService: 用户数据
+AuthService --> APIGateway: Token有效
+
+== 创建任务 ==
+APIGateway -> ScanService: create_scan_task()
+ScanService -> PostgreSQL: INSERT scan_tasks
+PostgreSQL --> ScanService: task_id
+ScanService -> RabbitMQ: 发送任务消息
+ScanService --> APIGateway: 202 Accepted
+APIGateway --> Frontend: {task_id, status: 'pending'}
+Frontend --> User: 任务已创建
+
+== 异步扫描 ==
+RabbitMQ -> CeleryWorker: 消费任务
+CeleryWorker -> PostgreSQL: UPDATE status='running'
+CeleryWorker -> Nettacker: 执行扫描
+Nettacker --> CeleryWorker: 漏洞列表
+CeleryWorker -> PostgreSQL: INSERT vulnerabilities
+CeleryWorker -> PostgreSQL: UPDATE status='completed'
+CeleryWorker -> WebSocket: 发送通知
+WebSocket -> Frontend: 推送结果
+Frontend --> User: 显示扫描结果
+
+@enduml

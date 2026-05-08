@@ -1,0 +1,47 @@
+@startuml 部署图
+title SecGuard漏洞管理平台 - 部署架构
+
+' 定义边界
+cloud "互联网" as Internet
+node "阿里云ECS服务器" as Server {
+    frame "Nginx反向代理" as Nginx {
+        component "前端静态资源" as Frontend
+        component "API网关" as APIGateway
+    }
+    frame "Django应用集群" as Backend {
+        component "认证服务" as AuthService
+        component "扫描服务" as ScanService
+        component "漏洞服务" as VulnService
+        component "报告服务" as ReportService
+    }
+}
+
+database "PostgreSQL 16" as DB
+database "Redis 7.0" as Cache
+queue "RabbitMQ 3.12" as MQ
+
+' 连接关系
+actor 用户 as User
+User --> Internet : HTTPS
+Internet --> Nginx : HTTPS
+
+Nginx --> Frontend : 静态资源请求
+Nginx --> APIGateway : API请求
+
+APIGateway --> AuthService : 认证请求
+APIGateway --> ScanService : 扫描请求
+APIGateway --> VulnService : 漏洞管理请求
+APIGateway --> ReportService : 报告请求
+
+AuthService --> DB : 读写用户数据
+ScanService --> DB : 读写任务数据
+VulnService --> DB : 读写漏洞数据
+ReportService --> DB : 读写报告数据
+
+ScanService --> Cache : 缓存扫描状态
+AuthService --> Cache : 缓存Session
+
+ScanService --> MQ : 发送扫描任务
+MQ --> ScanService : 接收任务完成通知
+
+@enduml

@@ -1,320 +1,267 @@
-# SecGuard 团队编码规范
-
-## 目录
-
-1. [概述](#1-概述)
-2. [Python/Django 编码规范](#2-pythondjango-编码规范)
-   - 2.1 命名规则
-   - 2.2 代码格式
-   - 2.3 注释规范
-   - 2.4 类与方法规范
-   - 2.5 数据库操作规范
-3. [JavaScript/React 编码规范](#3-javascriptreact-编码规范)
-   - 3.1 命名规则
-   - 3.2 代码格式
-   - 3.3 组件开发规范
-   - 3.4 Hooks 使用规范
-4. [通用规范](#4-通用规范)
-   - 4.1 错误处理
-   - 4.2 日志规范
-   - 4.3 安全规范
-   - 4.4 Git 提交规范
-5. [附录](#5-附录)
-
----
+# SecGuard 漏洞管理平台 - 团队编码规范
 
 ## 1. 概述
 
-本编码规范旨在：
-- 提高代码可读性和可维护性
-- 确保团队代码风格一致
-- 增强代码安全性
-- 促进团队协作效率
+本规范旨在统一团队代码风格，提高代码质量和可维护性。所有团队成员必须严格遵守此规范。
 
-所有团队成员必须严格遵守本规范。
+## 2. 命名规范
 
----
+### 2.1 通用规则
+- **类名**：大驼峰（PascalCase），如 `UserService`
+- **方法/函数名**：小驼峰（camelCase），如 `getUserById`
+- **变量名**：小驼峰，如 `userName`
+- **常量名**：全大写+下划线，如 `MAX_RETRY_COUNT`
+- **文件名**：小写+下划线，如 `user_service.py`
+- **目录名**：小写+下划线，如 `api_v1`
 
-## 2. Python/Django 编码规范
+### 2.2 特殊命名
+- **测试文件**：以 `_test.py` 结尾，如 `user_service_test.py`
+- **配置文件**：以 `config` 开头，如 `config_dev.py`
+- **迁移文件**：遵循 Django 迁移命名规范
 
-### 2.1 命名规则
+## 3. 格式规范
 
-| 类型 | 命名方式 | 示例 |
-|------|----------|------|
-| 类名 | 大驼峰式（PascalCase） | `ReportService`, `UserManager` |
-| 函数/方法名 | 小驼峰式（camelCase） | `create_report`, `get_user_info` |
-| 变量名 | 下划线分隔（snake_case） | `user_id`, `max_file_size` |
-| 常量名 | 全大写+下划线分隔 | `MAX_RETRY`, `SECRET_KEY` |
-| 模块/文件名 | 下划线分隔（snake_case） | `report_service.py`, `auth_utils.py` |
-| 数据库表名 | 下划线分隔，全小写，复数形式 | `users`, `vulnerability_reports` |
-| 模型类名 | 大驼峰式，单数形式 | `User`, `Report` |
+### 3.1 缩进
+- 使用 **4个空格**，禁用 Tab 键
+- 在 VS Code 中设置：`"editor.insertSpaces": true, "editor.tabSize": 4`
 
-### 2.2 代码格式
+### 3.2 行宽
+- 单行代码不超过 **120 字符**
+- 过长的表达式应适当换行
 
-- **缩进**：使用4个空格
-- **行宽**：每行不超过120字符
-- **空行**：
-  - 函数/类定义前后各空2行
-  - 函数内逻辑块之间空1行
-- **空格**：
-  - 二元运算符前后加空格（`a + b`，非 `a+b`）
-  - 逗号后加空格
-  - 冒号后加空格（字典、函数参数默认值）
+### 3.3 空行
+- 函数/类之间空 **2行**
+- 方法之间空 **1行**
+- 逻辑块之间空 **1行**
 
-### 2.3 注释规范
+### 3.4 括号
+- 条件表达式使用括号明确优先级
+- 函数参数过长时，每个参数独占一行
 
-**模块注释**：文件开头，包含文件说明、作者、版本
+## 4. 注释规范
 
+### 4.1 文件头部
 ```python
 """
-漏洞报告服务模块
-负责漏洞报告的创建、查询、更新等业务逻辑
+模块功能描述
 
-Author: 林源龙
+Author: 作者名
+Date: 2026-04-20
 Version: 1.0
 """
 ```
 
-**类注释**：类定义前，说明类的职责
-
+### 4.2 类注释
 ```python
-class ReportService:
+class UserService:
     """
-    漏洞报告服务类
-    提供漏洞报告相关的业务操作
+    用户服务类
+    
+    提供用户注册、登录、权限管理等功能
     """
 ```
 
-**方法注释**：方法定义前，包含功能说明、参数、返回值
-
+### 4.3 方法注释
 ```python
-def create_report(self, data: dict) -> Report:
+def register(self, username: str, email: str, password: str) -> User:
     """
-    创建漏洞报告
+    用户注册
     
     Args:
-        data: 报告数据字典，包含title, description, severity等字段
+        username: 用户名
+        email: 邮箱地址
+        password: 明文密码
         
     Returns:
-        Report: 创建成功的漏洞报告对象
+        User: 创建成功的用户对象
         
     Raises:
-        ValidationError: 数据验证失败时抛出
-        PermissionError: 权限不足时抛出
+        ValidationError: 用户名或邮箱已存在
     """
 ```
 
-**行内注释**：复杂逻辑处添加注释，解释"为什么"而非"做什么"
+### 4.4 代码注释
+- 复杂逻辑必须添加注释
+- 注释应解释 **为什么** 而非 **是什么**
+- 避免无意义注释
 
-### 2.4 类与方法规范
+## 5. Python 特定规范
 
-**类设计原则**：
-- 单一职责：每个类只负责一个功能领域
-- 依赖注入：通过构造函数注入依赖
-- 接口隔离：定义清晰的公共方法
+### 5.1 导入顺序
+1. 标准库导入（如 `os`, `sys`）
+2. 第三方库导入（如 `django`, `requests`）
+3. 项目内部导入
+4. 相对导入
 
-**方法设计原则**：
-- 方法长度不超过50行
-- 每个方法只做一件事
-- 参数不超过5个
-
-### 2.5 数据库操作规范
-
-**使用 ORM**：
-- 优先使用 Django ORM，避免直接写 SQL
-- 查询使用 `filter()`、`exclude()` 等方法
-- 批量操作使用 `bulk_create()`、`bulk_update()`
-
-**查询优化**：
-- 使用 `select_related()` 和 `prefetch_related()` 避免 N+1 查询
-- 添加适当的索引
-- 复杂查询考虑使用 `annotate()` 和 `aggregate()`
-
----
-
-## 3. JavaScript/React 编码规范
-
-### 3.1 命名规则
-
-| 类型 | 命名方式 | 示例 |
-|------|----------|------|
-| 组件名 | 大驼峰式 | `ReportForm`, `VulnerabilityList` |
-| 函数/方法名 | 小驼峰式 | `handleSubmit`, `fetchReports` |
-| 变量名 | 小驼峰式 | `isLoading`, `reportData` |
-| 常量名 | 全大写+下划线 | `API_BASE_URL`, `MAX_RETRY` |
-| 文件命名 | 组件用大驼峰，工具函数用小驼峰 | `ReportForm.jsx`, `apiUtils.js` |
-
-### 3.2 代码格式
-
-- **缩进**：使用2个空格
-- **行宽**：每行不超过120字符
-- **空行**：组件逻辑块之间空1行
-- **括号**：
-  - if/for/while 语句的条件表达式前后加空格
-  - 箭头函数参数超过1个时加括号
-
-### 3.3 组件开发规范
-
-**组件结构**：
-```jsx
-// 1. 导入语句（按字母序排列）
-import React, { useState, useEffect } from 'react';
-import { Button, Input } from 'antd';
-
-// 2. 组件定义
-const ReportForm = ({ onSubmit }) => {
-    // 3. 状态定义
-    const [formData, setFormData] = useState({ title: '', description: '' });
-    const [isLoading, setIsLoading] = useState(false);
-    
-    // 4. 副作用
-    useEffect(() => {
-        // 初始化逻辑
-    }, []);
-    
-    // 5. 事件处理
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        // 提交逻辑
-    };
-    
-    // 6. 渲染
-    return (
-        <form onSubmit={handleSubmit}>
-            {/* 表单内容 */}
-        </form>
-    );
-};
-
-// 7. 导出
-export default ReportForm;
-```
-
-**组件拆分原则**：
-- 一个组件只负责一个功能
-- 复杂组件拆分为多个小组件
-- 可复用的逻辑提取为自定义 Hooks
-
-### 3.4 Hooks 使用规范
-
-**使用规则**：
-- 只在函数组件顶层调用 Hooks
-- 不要在循环、条件或嵌套函数中调用 Hooks
-- 自定义 Hooks 以 `use` 开头命名
-
-**常用 Hooks**：
-- `useState`: 管理组件状态
-- `useEffect`: 处理副作用
-- `useCallback`: 缓存函数引用
-- `useMemo`: 缓存计算结果
-
----
-
-## 4. 通用规范
-
-### 4.1 错误处理
-
-**错误响应格式**：
-```json
-{
-    "status": "error",
-    "code": 400,
-    "message": "参数验证失败",
-    "details": ["title字段不能为空"]
-}
-```
-
-**异常处理原则**：
-- 捕获所有可能的异常
-- 提供清晰的错误信息
-- 不要暴露系统内部信息给前端
-
-### 4.2 日志规范
-
-| 级别 | 使用场景 | 示例 |
-|------|----------|------|
-| DEBUG | 详细调试信息 | 函数参数、返回值 |
-| INFO | 重要业务操作 | 用户登录、报告创建 |
-| WARNING | 潜在问题 | 过期Token尝试 |
-| ERROR | 错误但不影响系统 | API调用失败 |
-| CRITICAL | 严重错误 | 服务不可用 |
-
-**日志格式**：
 ```python
-# Python
-logger.info(f"用户 {user_id} 登录成功，IP: {ip_address}")
+import os
+import json
 
-# JavaScript
-console.info(`用户 ${userId} 登录成功`);
+from django.db import models
+from ninja import Router
+
+from .services import UserService
+from ..utils import encrypt_password
 ```
 
-### 4.3 安全规范
+### 5.2 类型提示
+- 所有函数必须添加类型提示
+- 使用 `Optional`, `List`, `Dict` 等类型
 
-| 风险类型 | 防范措施 |
-|----------|----------|
-| SQL注入 | 使用ORM，参数化查询 |
-| XSS攻击 | 前端转义，后端过滤，CSP配置 |
-| 密码泄露 | BCrypt加密，HTTPS传输 |
-| 未授权访问 | JWT认证，RBAC权限控制 |
-| CSRF攻击 | CSRF Token验证 |
-| 文件上传 | 类型校验，路径白名单，大小限制 |
-| 敏感信息 | 日志脱敏，响应过滤 |
-
-### 4.4 Git 提交规范
-
-**提交信息格式**：
-```
-<type>(<scope>): <description>
-
-[optional body]
-
-[optional footer]
+```python
+def get_users(role: Optional[str] = None) -> List[User]:
+    """获取用户列表"""
 ```
 
-**type 类型**：
-| 类型 | 说明 |
-|------|------|
-| feat | 新功能 |
-| fix | 修复bug |
-| docs | 文档更新 |
-| style | 代码格式调整 |
-| refactor | 代码重构 |
-| test | 测试代码 |
-| chore | 构建/工具更新 |
+### 5.3 异常处理
+- 使用统一的异常类
+- 避免空 `except` 块
+- 记录异常日志
 
-**示例**：
-```
-feat(report): 添加漏洞报告导出功能
-
-- 支持PDF格式导出
-- 支持HTML格式导出
-- 添加导出按钮组件
+```python
+try:
+    user = User.objects.get(id=user_id)
+except User.DoesNotExist:
+    logger.error(f"User {user_id} not found")
+    raise ObjectNotFoundError("用户不存在")
 ```
 
----
+## 6. Django 特定规范
 
-## 5. 附录
+### 6.1 模型设计
+- 主键使用 UUIDField
+- 使用 verbose_name 提供中文说明
+- 字段命名使用小写+下划线
 
-### A. 代码审查清单
+```python
+class User(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    username = models.CharField(max_length=50, unique=True, verbose_name="用户名")
+    email = models.EmailField(unique=True, verbose_name="邮箱")
+```
 
-- [ ] 代码符合命名规范
-- [ ] 有足够的注释
-- [ ] 没有硬编码的魔法数字
-- [ ] 错误处理完善
-- [ ] 没有安全漏洞
-- [ ] 测试用例覆盖核心逻辑
+### 6.2 API 设计
+- 使用 Django Ninja 框架
+- 统一响应格式
+- 添加权限装饰器
 
-### B. 工具推荐
+```python
+@router.post("/login", auth=JWTAuth())
+def login(request, data: LoginRequest):
+    """用户登录"""
+    pass
+```
 
-| 工具 | 用途 |
-|------|------|
-| Black | Python代码格式化 |
-| ESLint | JavaScript代码检查 |
-| Prettier | 代码格式化 |
-| SonarLint | 代码质量检查 |
+## 7. 前端规范（React）
+
+### 7.1 组件命名
+- 组件名使用大驼峰
+- 文件名为组件名+`.tsx`
+
+### 7.2 Hooks 使用
+- 自定义 Hooks 以 `use` 开头
+- 避免在循环中使用 Hooks
+
+### 7.3 状态管理
+- 使用 React Context 或 Zustand
+- 状态命名清晰
+
+## 8. 安全规范
+
+### 8.1 密码处理
+- 使用 BCrypt 加密（10轮）
+- 禁止明文存储密码
+
+### 8.2 SQL 注入防护
+- 使用 ORM 查询
+- 禁止拼接 SQL
+
+### 8.3 XSS 防护
+- 使用 React 自动转义
+- 对用户输入进行过滤
+
+### 8.4 权限控制
+- 每个 API 都需要权限校验
+- 使用 JWT Token 认证
+
+## 9. 日志规范
+
+### 9.1 日志级别
+- **DEBUG**：详细调试信息（开发环境）
+- **INFO**：业务流程记录（生产环境）
+- **WARNING**：警告信息（需要关注）
+- **ERROR**：错误信息（需要修复）
+- **CRITICAL**：严重错误（服务不可用）
+
+### 9.2 日志格式
+```python
+logger.info(f"User {user_id} logged in from {ip_address}")
+logger.error(f"Failed to send email to {email}", exc_info=True)
+```
+
+## 10. Git 规范
+
+### 10.1 分支命名
+- `feature/xxx`：新功能开发
+- `bugfix/xxx`：修复 Bug
+- `hotfix/xxx`：紧急修复
+- `release/xxx`：发布版本
+
+### 10.2 提交信息
+- 使用英文动词开头
+- 简洁明了（不超过 50 字符）
+- 描述具体变更
+
+```
+feat: 添加用户注册功能
+fix: 修复登录页面样式问题
+docs: 更新 API 文档
+```
+
+## 11. 测试规范
+
+### 11.1 测试覆盖
+- 单元测试覆盖率 ≥ 80%
+- 核心功能必须有集成测试
+
+### 11.2 测试命名
+- 测试方法以 `test_` 开头
+- 描述清晰
+
+```python
+def test_user_register_success(self):
+    """测试用户注册成功"""
+    pass
+```
+
+## 12. 代码审查
+
+### 12.1 PR 要求
+- 必须有至少 1 人审查
+- 通过所有测试
+- 符合编码规范
+
+### 12.2 审查要点
+- 安全性
+- 性能
+- 可维护性
+- 代码风格
+
+## 附录
+
+### A. 工具配置
+- **IDE**：VS Code
+- **格式化工具**：Black
+- **代码检查**：flake8, pylint
+- **类型检查**：mypy
+
+### B. 参考文档
+- [PEP 8 -- Style Guide for Python Code](https://www.python.org/dev/peps/pep-0008/)
+- [Django Coding Style](https://docs.djangoproject.com/en/dev/internals/contributing/writing-code/coding-style/)
+- [React Style Guide](https://react.dev/learn/style-guide)
 
 ---
 
 **版本**：v1.0  
-**生效日期**：2026年5月8日  
-**团队**：随便吧！
+**生效日期**：2026年4月20日  
+**制定团队**：suibianba 团队
