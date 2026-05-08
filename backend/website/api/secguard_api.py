@@ -201,6 +201,22 @@ def get_client_ip(request: HttpRequest) -> str:
     return request.META.get('REMOTE_ADDR', '0.0.0.0')
 
 
+def annotate_report(report):
+    """为 Report 对象添加响应所需的注解字段"""
+    from django.db.models import F
+    return (
+        Report.objects
+        .filter(vuln_id=report.vuln_id)
+        .select_related('reporter', 'assignee', 'project')
+        .annotate(
+            reporter_username=F('reporter__username'),
+            assignee_username=F('assignee__username'),
+            project_name=F('project__name'),
+        )
+        .first()
+    )
+
+
 def create_audit_log(user, action: str, target_type: str, target_id: str,
                      detail: str = "", request: HttpRequest = None):
     """创建审计日志记录（核心审计功能）"""
@@ -469,7 +485,9 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         status=Report.Status.PENDING,
         reporter=request.user,
         project=project,
-        cve_id=payload.cve_id,
+        cve_id=payload.cve_id or "",
+        affected_url=payload.affected_url or "",
+        reproduction_steps=payload.reproduction_steps or "",
     )
 
     create_audit_log(
@@ -481,7 +499,9 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         request=request
     )
 
-    return report
+    from django.db.models import F
+    vuln_id = report.vuln_id
+    return annotate_report(report)
 
 
 @router.get("/reports", response=List[ReportListSchema])
@@ -564,12 +584,17 @@ def get_report_detail(request: HttpRequest, vuln_id: str):
         report = (
             Report.objects
             .select_related('reporter', 'assignee', 'project')
+            .annotate(
+                reporter_username=F('reporter__username'),
+                assignee_username=F('assignee__username'),
+                project_name=F('project__name'),
+            )
             .get(vuln_id=vuln_id)
         )
     except Report.DoesNotExist:
         raise ValueError(f"漏洞报告 {vuln_id} 不存在或已被删除")
 
-    return report
+    return annotate_report(report)
 
 
 @router.put("/reports/{vuln_id}", response=ReportDetailSchema)
@@ -613,7 +638,7 @@ def update_report(request: HttpRequest, vuln_id: str, payload: ReportUpdateSchem
         request=request
     )
 
-    return report
+    return annotate_report(report)
 
 
 # ==============================================================================
@@ -664,7 +689,7 @@ def assign_report(request: HttpRequest, vuln_id: str, payload: AssignReportSchem
         request=request
     )
 
-    return report
+    return annotate_report(report)
 
 
 @router.post("/reports/{vuln_id}/transition", response=ReportDetailSchema)
@@ -778,7 +803,7 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
         request=request
     )
 
-    return report
+    return annotate_report(report)
 
 
 # ==============================================================================
@@ -882,14 +907,14 @@ def api_statistics_overview(request: HttpRequest):
     status_stats = (
         Report.objects
         .values('status')
-        .annotate(count=models.Count('id'))
+        .annotate(count=models.Count('pk'))
         .order_by('-count')
     )
 
     severity_stats = (
         Report.objects
         .values('severity')
-        .annotate(count=models.Count('id'))
+        .annotate(count=models.Count('pk'))
         .order_by('-count')
     )
 

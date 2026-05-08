@@ -34,20 +34,14 @@ COPY pyproject.toml poetry.lock* ./
 RUN pip uninstall -y httpx || true
 RUN pip install --upgrade pip
 
-# Update lock file if pyproject.toml changed, then install dependencies
-RUN poetry lock --no-update || (echo "Lock file outdated, regenerating..." && poetry lock) && \
+# Install dependencies - use poetry lock then install
+RUN poetry lock 2>/dev/null || true && \
     poetry install --no-root --no-interaction || \
-    (echo "First attempt failed, clearing Poetry cache..." && \
-     poetry cache clear pypi --all -n && \
-     sleep 5 && \
+    (echo "Poetry install failed, retrying..." && \
      poetry lock && \
-     poetry install --no-root --no-interaction -vvv) || \
-    (echo "Second attempt failed, final retry..." && \
-     sleep 10 && \
-     poetry lock && \
-     poetry install --no-root --no-interaction -vvv)
+     poetry install --no-root --no-interaction)
 # Install additional Python packages
-RUN pip install opentelemetry-api opentelemetry-instrumentation
+RUN pip install opentelemetry-api opentelemetry-instrumentation django-cors-headers
 
 # Stage 2: Runtime stage
 FROM python:3.11.2-slim
