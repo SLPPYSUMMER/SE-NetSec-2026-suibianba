@@ -9,6 +9,8 @@ interface User {
   email: string;
   role: string;
   is_staff: boolean;
+  team_id: number | null;
+  team_name: string | null;
 }
 
 interface AuthContextType {
@@ -17,46 +19,64 @@ interface AuthContextType {
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: '团队管理员',
+  team_lead: '团队负责人',
+  developer: '开发人员',
+  observer: '观察者',
+};
+
+function roleLabel(role: string | null, isStaff: boolean): string {
+  if (isStaff) return '系统管理员';
+  return ROLE_LABELS[role || ''] || '未分配角色';
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    authApi.check()
-      .then((data) => {
-        if (data.authenticated) {
-          setIsAuthenticated(true);
-          setUser({
-            id: data.user_id!,
-            name: data.username!,
-            email: '',
-            role: data.is_staff ? '管理员' : '安全分析师',
-            is_staff: data.is_staff,
-          });
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const buildUser = (data: any): User => ({
+    id: data.user_id || data.id,
+    name: data.username,
+    email: data.email || '',
+    role: roleLabel(data.role, data.is_staff),
+    is_staff: data.is_staff,
+    team_id: data.team_id || null,
+    team_name: data.team_name || null,
+  });
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const data = await authApi.check();
+      if (data.authenticated) {
+        setIsAuthenticated(true);
+        setUser(buildUser(data));
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+      }
+    } catch {
+      setIsAuthenticated(false);
+      setUser(null);
+    }
   }, []);
+
+  useEffect(() => {
+    refreshUser().finally(() => setLoading(false));
+  }, [refreshUser]);
 
   const login = useCallback(async (username: string, password: string) => {
     const res = await authApi.login(username, password);
     if (res.success) {
-      setIsAuthenticated(true);
-      setUser({
-        id: res.user_id,
-        name: res.username,
-        email: `${res.username}@secguard.io`,
-        role: res.is_staff ? '管理员' : '安全分析师',
-        is_staff: res.is_staff,
-      });
+      await refreshUser();
     }
-  }, []);
+  }, [refreshUser]);
 
   const logout = useCallback(async () => {
     try { await authApi.logout(); } catch {}
@@ -65,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, loading, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, loading, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -10,6 +10,7 @@ import {
   BarChart3,
   Settings,
   Activity,
+  Users,
   LogOut,
   ChevronLeft,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ const menuItems = [
   { icon: Search, label: '扫描任务', href: '/scans' },
   { icon: FileText, label: '资产管理', href: '/assets' },
   { icon: BarChart3, label: '报告中心', href: '/reports' },
+  { icon: Users, label: '团队管理', href: '/team' },
   { icon: Settings, label: '系统设置', href: '/settings' },
 ];
 

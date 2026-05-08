@@ -21,8 +21,8 @@ export default function DashboardPage() {
       try {
         const s = await statsApi.overview().catch(() => null);
         setStats(s);
-        const r = await reportApi.list({ page: '1', per_page: '5', sort_by: 'created_at', order: 'desc' }).catch(() => []);
-        setRecentVulns(Array.isArray(r) ? r : []);
+        const r = await reportApi.list({ page: '1', per_page: '5', sort_by: 'created_at', order: 'desc' }).catch(() => ({ items: [], total_count: 0 }));
+        setRecentVulns(Array.isArray(r.items) ? r.items : []);
       } catch {}
       finally { setLoading(false); }
     };

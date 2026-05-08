@@ -30,8 +30,10 @@ from website.models import (
     Vulnerability,
     AuditLog,
     Project,
+    TeamMembership,
     Issue  # 复用原有 Issue 模型进行关联查询
 )
+from website.models import Organization
 
 # 复用 BLT 现有工具函数
 try:
@@ -221,13 +223,22 @@ def create_audit_log(user, action: str, target_type: str, target_id: str,
                      detail: str = "", request: HttpRequest = None):
     """创建审计日志记录（核心审计功能）"""
     ip_address = get_client_ip(request) if request else None
+    team = None
+    if user and user.is_authenticated and hasattr(user, 'userprofile'):
+        membership = TeamMembership.objects.filter(
+            user=user,
+            status=TeamMembership.Status.ACCEPTED,
+        ).first()
+        if membership:
+            team = membership.team
     AuditLog.objects.create(
         user=user,
         action=action,
         target_type=target_type,
         target_id=str(target_id),
         detail=detail,
-        ip_address=ip_address
+        ip_address=ip_address,
+        team=team,
     )
 
 
@@ -253,6 +264,61 @@ def check_permission(user, required_role: str = None) -> bool:
         return role_permissions.get(required_role, False)
 
     return True
+
+
+def get_user_team(request: HttpRequest):
+    """
+    获取当前用户的团队 Organization 对象。
+    系统管理员 (is_staff) 可跨团队访问。
+    返回 (team, membership) 元组，若未加入团队则返回 (None, None)。
+    """
+    if not request.user.is_authenticated or not hasattr(request.user, 'userprofile'):
+        return None, None
+    membership = TeamMembership.objects.filter(
+        user=request.user,
+        status=TeamMembership.Status.ACCEPTED,
+    ).select_related('team').first()
+    if membership:
+        return membership.team, membership
+    return None, None
+
+
+def require_team(request: HttpRequest):
+    """获取团队，若未加入团队则抛异常"""
+    team, membership = get_user_team(request)
+    if team is None:
+        raise ValueError("您尚未加入任何团队，请先创建或加入团队")
+    return team, membership
+
+
+def require_team_role(request: HttpRequest, allowed_roles: list):
+    """获取团队并要求指定角色"""
+    team, membership = require_team(request)
+    if request.user.is_staff:
+        return team, membership
+    if membership.role not in allowed_roles:
+        role_labels = dict(TeamMembership.Role.choices)
+        allowed_labels = [role_labels.get(r, r) for r in allowed_roles]
+        raise ValueError(f"需要{'/'.join(allowed_labels)}权限才能执行此操作")
+    return team, membership
+
+
+def filter_by_team(queryset, request: HttpRequest):
+    """对 queryset 按用户团队过滤；管理员不过滤"""
+    if request.user.is_staff:
+        return queryset
+    team, _ = get_user_team(request)
+    if team is None:
+        return queryset.none()
+    return queryset.filter(team=team)
+
+
+def set_request_team(request: HttpRequest) -> Optional[Organization]:
+    """返回当前用户 team 用于创建记录"""
+    if request.user.is_staff:
+        return None
+    team, _ = get_user_team(request)
+    return team
 
 
 def check_report_duplicates(title: str, description: str, project_id: int) -> Dict:
@@ -303,17 +369,16 @@ def check_report_duplicates(title: str, description: str, project_id: int) -> Di
 
 def annotate_report_queryset(queryset):
     """为 Report QuerySet 添加注解字段（优化列表查询性能）"""
+    from django.db.models import F as FExpr
     return queryset.select_related(
         'reporter',
         'assignee',
         'project'
     ).annotate(
-        reporter_username=F('reporter__username'),
-        assignee_username=F('assignee__username'),
-        project_name=F('project__name')
+        reporter_username=FExpr('reporter__username'),
+        assignee_username=FExpr('assignee__username'),
+        project_name=FExpr('project__name')
     )
-
-from django.db.models import F
 
 
 # ==============================================================================
@@ -384,30 +449,122 @@ def api_logout(request: HttpRequest):
     return {"success": True, "message": "已登出"}
 
 
-@router.get("/auth/me", response=UserSchema)
+@router.get("/auth/me")
 def api_get_current_user(request: HttpRequest):
     """
     获取当前登录用户完整信息
-    用于前端渲染用户头像、权限按钮等
+    包含团队角色等用于前端权限渲染
     """
     if not request.user.is_authenticated:
         raise ValueError("未登录或会话已过期")
+    team, membership = get_user_team(request)
+    return {
+        "id": request.user.id,
+        "username": request.user.username,
+        "email": request.user.email or "",
+        "is_staff": request.user.is_staff,
+        "is_superuser": request.user.is_superuser,
+        "team_id": team.id if team else None,
+        "team_name": team.name if team else None,
+        "role": membership.role if membership else None,
+    }
 
-    return request.user
+
+class RegisterSchema(BaseModel):
+    username: str = Field(..., min_length=3, max_length=150, description="用户名")
+    password: str = Field(..., min_length=6, max_length=128, description="密码")
+    email: Optional[str] = Field(None, max_length=254, description="邮箱（可选）")
+    team_action: Optional[str] = Field(None, description="团队操作: create 创建团队 / join 加入团队")
+    team_name: Optional[str] = Field(None, max_length=255, description="创建团队时的团队名称")
+    team_id: Optional[int] = Field(None, description="加入团队时的团队ID")
+
+
+@router.post("/auth/register", response=LoginResponse, auth=None)
+def api_register(request: HttpRequest, payload: RegisterSchema):
+    """
+    用户注册接口
+    支持三种模式：
+      - 不传 team_action：仅注册账户，稍后加入团队
+      - team_action=create + team_name：自动创建团队并设为团队管理员
+      - team_action=join + team_id：申请加入已有团队（待审核）
+    """
+    if User.objects.filter(username=payload.username).exists():
+        raise ValueError("用户名已被注册，请更换用户名")
+
+    user = User.objects.create_user(
+        username=payload.username,
+        password=payload.password,
+        email=payload.email or "",
+    )
+    user.save()
+
+    # 确保 UserProfile 存在
+    from website.models import UserProfile
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    if payload.team_action == "create" and payload.team_name:
+        existing = Organization.objects.filter(name=payload.team_name, type="team").first()
+        if existing:
+            raise ValueError(f"团队名称 '{payload.team_name}' 已被使用，请更换名称")
+        team = Organization.objects.create(
+            name=payload.team_name,
+            type="team",
+            admin=user,
+        )
+        TeamMembership.objects.create(
+            user=user,
+            team=team,
+            role=TeamMembership.Role.ADMIN,
+            status=TeamMembership.Status.ACCEPTED,
+        )
+        profile.team = team
+        profile.role = "admin"
+        profile.save()
+
+    elif payload.team_action == "join" and payload.team_id:
+        team = Organization.objects.filter(id=payload.team_id, type="team").first()
+        if not team:
+            raise ValueError("指定的团队不存在")
+        already = TeamMembership.objects.filter(user=user, team=team).first()
+        if already:
+            raise ValueError("您已申请过该团队，请等待审核")
+        TeamMembership.objects.create(
+            user=user,
+            team=team,
+            role=TeamMembership.Role.DEVELOPER,
+            status=TeamMembership.Status.PENDING,
+        )
+
+    create_audit_log(
+        user=user,
+        action='REGISTER_SUCCESS',
+        target_type='User',
+        target_id=str(user.id),
+        detail=f"新用户注册: {user.username} (IP: {get_client_ip(request)})",
+        request=request
+    )
+
+    return LoginResponse(
+        success=True,
+        message="注册成功，请登录",
+        user_id=user.id,
+        username=user.username,
+        is_staff=user.is_staff
+    )
 
 
 @router.get("/auth/check", auth=None)
 def api_check_auth(request: HttpRequest):
-    """
-    检查当前登录状态（轻量级接口）
-    用于前端路由守卫、Token 刷新等场景
-    """
     is_auth = request.user.is_authenticated
+    team, membership = get_user_team(request)
     return {
         "authenticated": is_auth,
         "user_id": request.user.id if is_auth else None,
         "username": request.user.username if is_auth else None,
-        "is_staff": request.user.is_staff if is_auth else False
+        "is_staff": request.user.is_staff if is_auth else False,
+        "team_id": team.id if team else None,
+        "team_name": team.name if team else None,
+        "role": membership.role if membership else None,
     }
 
 
@@ -485,6 +642,7 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         status=Report.Status.PENDING,
         reporter=request.user,
         project=project,
+        team=set_request_team(request),
         cve_id=payload.cve_id or "",
         affected_url=payload.affected_url or "",
         reproduction_steps=payload.reproduction_steps or "",
@@ -504,7 +662,7 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
     return annotate_report(report)
 
 
-@router.get("/reports", response=List[ReportListSchema])
+@router.get("/reports")
 def list_reports(
     request: HttpRequest,
     page: int = Query(1, ge=1, description="页码"),
@@ -520,16 +678,12 @@ def list_reports(
 ):
     """
     获取漏洞报告列表（支持多维度筛选和分页）
-
-    使用场景：
-      - Dashboard 统计面板
-      - 漏洞管理列表页
-      - 个人任务看板
-      - 导出报表数据源
+    返回 { items: [...], total_count: N, page: N, per_page: N }
     """
     queryset = Report.objects.all()
 
-    # 多维度筛选
+    queryset = filter_by_team(queryset, request)
+
     if status:
         queryset = queryset.filter(status=status)
 
@@ -552,7 +706,8 @@ def list_reports(
             Q(vuln_id__icontains=search)
         )
 
-    # 排序处理
+    total_count = queryset.count()
+
     valid_sort_fields = ['created_at', 'updated_at', 'severity', 'status']
     if sort_by in valid_sort_fields:
         order_prefix = '-' if order == 'desc' else ''
@@ -560,13 +715,17 @@ def list_reports(
     else:
         queryset = queryset.order_by('-created_at')
 
-    # 分页处理
     start = (page - 1) * per_page
     end = start + per_page
 
     reports = annotate_report_queryset(queryset)[start:end]
 
-    return reports
+    return {
+        "items": [ReportListSchema.from_orm(r) for r in reports],
+        "total_count": total_count,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 @router.get("/reports/{vuln_id}", response=ReportDetailSchema)
@@ -860,6 +1019,7 @@ def list_audit_logs(
         raise ValueError("需要管理员权限才能查看全局审计日志")
 
     queryset = AuditLog.objects.all()
+    queryset = filter_by_team(queryset, request)
 
     if action:
         queryset = queryset.filter(action__icontains=action)
@@ -945,6 +1105,339 @@ def api_statistics_overview(request: HttpRequest):
         ],
         'timestamp': datetime.now().isoformat()
     }
+
+
+@router.delete("/reports/{vuln_id}")
+def delete_report(request: HttpRequest, vuln_id: str):
+    if not request.user.is_authenticated:
+        raise ValueError("请先登录")
+    try:
+        report = Report.objects.get(vuln_id=vuln_id)
+    except Report.DoesNotExist:
+        raise ValueError(f"漏洞报告 {vuln_id} 不存在")
+    if report.reporter != request.user and not request.user.is_staff:
+        raise ValueError("只有上报人或管理员可以删除此漏洞报告")
+    report.delete()
+    create_audit_log(user=request.user, action='DELETE_REPORT', target_type='Report',
+                     target_id=vuln_id, detail=f"删除漏洞报告 {vuln_id}", request=request)
+    return {"success": True, "message": f"漏洞报告 {vuln_id} 已删除"}
+
+
+class ScanTaskOut(BaseModel):
+    id: int
+    scan_id: str
+    target: str
+    status: str
+    scanner_type: str
+    progress: int
+    findings_count: int
+    created_by: Optional[int]
+    created_by_name: Optional[str]
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ScanTaskCreateSchema(BaseModel):
+    target: str = Field(..., description="扫描目标URL")
+    scanner_type: str = Field("deep", description="扫描类型: deep/quick/custom")
+    name: Optional[str] = Field(None, description="任务名称（可选，默认自动生成）")
+
+
+@router.get("/scans")
+def list_scans(
+    request: HttpRequest,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+):
+    queryset = ScanTask.objects.all()
+    queryset = filter_by_team(queryset, request)
+    if status:
+        queryset = queryset.filter(status=status)
+
+    total_count = queryset.count()
+    items = queryset.select_related('created_by').order_by('-started_at')[(page - 1) * per_page:page * per_page]
+
+    result = []
+    for t in items:
+        result.append(ScanTaskOut(
+            id=t.id,
+            scan_id=f"SC-{t.id:04d}",
+            target=t.target,
+            status=t.status,
+            scanner_type=t.scanner_type,
+            progress=getattr(t, 'progress', 0),
+            findings_count=getattr(t, 'findings_count', 0),
+            created_by=t.created_by_id,
+            created_by_name=t.created_by.username if t.created_by else None,
+            started_at=t.started_at,
+            finished_at=t.finished_at,
+            created_at=t.started_at,
+        ))
+
+    return {"items": result, "total_count": total_count, "page": page, "per_page": per_page}
+
+
+@router.post("/scans")
+def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
+    if not request.user.is_authenticated:
+        raise ValueError("请先登录")
+    task = ScanTask.objects.create(
+        name=payload.name or f"Scan_{payload.target}_{datetime.now().strftime('%Y%m%d%H%M')}",
+        target=payload.target,
+        scanner_type=payload.scanner_type,
+        status=ScanTask.Status.PENDING,
+        team=set_request_team(request),
+        created_by=request.user,
+    )
+    return {
+        "id": task.id,
+        "scan_id": f"SC-{task.id:04d}",
+        "target": task.target,
+        "status": task.status,
+        "scanner_type": task.scanner_type,
+        "message": "扫描任务已创建"
+    }
+
+
+class ExportSchema(BaseModel):
+    format: str = Field("pdf", description="导出格式: pdf/html")
+    project_id: Optional[int] = Field(None, description="项目筛选")
+    status: Optional[str] = Field(None, description="状态筛选")
+
+
+@router.post("/reports-export")
+def export_reports(request: HttpRequest, payload: ExportSchema):
+    if not request.user.is_authenticated:
+        raise ValueError("请先登录")
+
+    queryset = Report.objects.all()
+    if payload.project_id:
+        queryset = queryset.filter(project_id=payload.project_id)
+    if payload.status:
+        queryset = queryset.filter(status=payload.status)
+
+    reports = queryset.select_related('reporter', 'assignee', 'project').order_by('-created_at')
+
+    items = []
+    for r in reports:
+        items.append({
+            "vuln_id": r.vuln_id,
+            "title": r.title,
+            "severity": r.severity,
+            "status": r.status,
+            "reporter": r.reporter.username if r.reporter else "",
+            "assignee": r.assignee.username if r.assignee else "",
+            "project": r.project.name if r.project else "",
+            "created_at": r.created_at.isoformat(),
+        })
+
+    total = queryset.count()
+    pending = queryset.filter(status=Report.Status.PENDING).count()
+    processing = queryset.filter(status=Report.Status.PROCESSING).count()
+    fixed = queryset.filter(status=Report.Status.FIXED).count()
+    reviewing = queryset.filter(status=Report.Status.REVIEWING).count()
+    closed = queryset.filter(status=Report.Status.CLOSED).count()
+
+    return {
+        "format": payload.format,
+        "generated_at": datetime.now().isoformat(),
+        "summary": {
+            "total": total, "pending": pending, "processing": processing,
+            "fixed": fixed, "reviewing": reviewing, "closed": closed,
+            "fix_rate": f"{(fixed + closed) / total * 100:.1f}%" if total > 0 else "0%",
+        },
+        "items": items,
+    }
+
+
+# Asset endpoint - aggregate from ScanTask targets and Reports
+@router.get("/assets")
+def list_assets(request: HttpRequest):
+    if not request.user.is_authenticated:
+        raise ValueError("请先登录")
+    scan_targets = ScanTask.objects.values('target').distinct()
+    affected_urls = Report.objects.exclude(affected_url="").values('affected_url').distinct()
+
+    urls = set()
+    for t in scan_targets:
+        url = t['target']
+        if url:
+            urls.add(url)
+    for r in affected_urls:
+        url = r['affected_url']
+        if url:
+            urls.add(url)
+
+    assets = []
+    for url in urls:
+        vuln_count = Report.objects.filter(affected_url=url).count()
+        last_scan = ScanTask.objects.filter(target=url).order_by('-started_at').first()
+        assets.append({
+            "id": abs(hash(url)) % 10000,
+            "name": url,
+            "url": url,
+            "type": "web_app",
+            "status": "online" if last_scan and last_scan.status == "finished" else "unknown",
+            "vulnerabilities": vuln_count,
+            "last_scan": last_scan.started_at.isoformat() if last_scan else None,
+            "criticality": "high" if vuln_count >= 5 else "medium" if vuln_count >= 1 else "low",
+        })
+
+    return {"items": assets, "total_count": len(assets)}
+
+
+# ==============================================================================
+# 团队管理接口 (Team Management)
+# ==============================================================================
+
+class TeamOut(BaseModel):
+    id: int
+    name: str
+    created: datetime
+    member_count: int = 0
+
+
+class TeamMemberOut(BaseModel):
+    user_id: int
+    username: str
+    email: str
+    role: str
+    role_label: str
+    status: str
+    status_label: str
+    joined_at: datetime
+
+
+class InviteSchema(BaseModel):
+    username: str = Field(..., description="被邀请的用户名")
+
+
+class HandleMemberSchema(BaseModel):
+    action: str = Field(..., description="approve / reject")
+    role: Optional[str] = Field(None, description="赋予角色: admin/team_lead/developer/observer")
+
+
+@router.get("/teams")
+def list_teams(request: HttpRequest, search: Optional[str] = Query(None)):
+    """列出所有团队（用于注册时选择加入）"""
+    if not request.user.is_authenticated:
+        raise ValueError("请先登录")
+    qs = Organization.objects.filter(type="team")
+    if search:
+        qs = qs.filter(name__icontains=search)
+    result = []
+    for t in qs[:50]:
+        result.append({
+            "id": t.id,
+            "name": t.name,
+            "member_count": TeamMembership.objects.filter(team=t, status="accepted").count(),
+            "admin_name": t.admin.username if t.admin else None,
+        })
+    return {"items": result}
+
+
+@router.get("/teams/members")
+def list_team_members(request: HttpRequest):
+    """列出当前用户所在团队的所有成员"""
+    team, membership = require_team(request)
+    ms = TeamMembership.objects.filter(team=team).select_related('user')
+    items = []
+    for m in ms:
+        items.append({
+            "id": m.id,
+            "user_id": m.user.id,
+            "username": m.user.username,
+            "email": m.user.email or "",
+            "role": m.role,
+            "role_label": m.get_role_display(),
+            "status": m.status,
+            "status_label": m.get_status_display(),
+            "joined_at": m.joined_at.isoformat(),
+        })
+    return {"items": items, "team_id": team.id, "team_name": team.name}
+
+
+@router.get("/teams/pending")
+def list_pending_members(request: HttpRequest):
+    """列出待审核的成员（仅团队管理员）"""
+    team, membership = require_team_role(request, ["admin", "team_lead"])
+    ms = TeamMembership.objects.filter(team=team, status="pending").select_related('user')
+    items = []
+    for m in ms:
+        items.append({
+            "id": m.id,
+            "user_id": m.user.id,
+            "username": m.user.username,
+            "email": m.user.email or "",
+            "joined_at": m.joined_at.isoformat(),
+        })
+    return {"items": items}
+
+
+@router.post("/teams/members/{member_id}/handle")
+def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSchema):
+    """审批成员（通过/拒绝/修改角色）"""
+    team, membership = require_team_role(request, ["admin", "team_lead"])
+    try:
+        m = TeamMembership.objects.get(id=member_id, team=team)
+    except TeamMembership.DoesNotExist:
+        raise ValueError("该申请不存在或不属于您的团队")
+
+    if payload.action == "approve":
+        m.status = TeamMembership.Status.ACCEPTED
+        m.reviewed_by = request.user
+        m.reviewed_at = datetime.now()
+        if payload.role and payload.role in dict(TeamMembership.Role.choices):
+            m.role = payload.role
+        m.save()
+        return {"success": True, "message": f"已通过 {m.user.username} 的加入申请"}
+
+    elif payload.action == "reject":
+        m.status = TeamMembership.Status.REJECTED
+        m.reviewed_by = request.user
+        m.reviewed_at = datetime.now()
+        m.save()
+        return {"success": True, "message": f"已拒绝 {m.user.username} 的加入申请"}
+
+    elif payload.action == "change_role":
+        if not payload.role:
+            raise ValueError("请指定新角色")
+        if payload.role not in dict(TeamMembership.Role.choices):
+            raise ValueError("无效的角色类型")
+        m.role = payload.role
+        profile = m.user.userprofile
+        profile.role = payload.role
+        profile.save()
+        m.save()
+        return {"success": True, "message": f"已将 {m.user.username} 的角色更改为 {m.get_role_display()}"}
+
+    raise ValueError("无效的操作，请使用 approve / reject / change_role")
+
+
+@router.post("/teams/invite")
+def invite_member(request: HttpRequest, payload: InviteSchema):
+    """邀请用户加入团队"""
+    team, membership = require_team_role(request, ["admin", "team_lead"])
+    invited = User.objects.filter(username=payload.username).first()
+    if not invited:
+        raise ValueError("用户不存在")
+    already = TeamMembership.objects.filter(user=invited, team=team).first()
+    if already:
+        raise ValueError("该用户已在团队中或已申请加入")
+    TeamMembership.objects.create(
+        user=invited,
+        team=team,
+        role=TeamMembership.Role.DEVELOPER,
+        status=TeamMembership.Status.ACCEPTED,
+        reviewed_by=request.user,
+        reviewed_at=datetime.now(),
+    )
+    return {"success": True, "message": f"已邀请 {invited.username} 加入团队"}
 
 
 import django.db.models as models

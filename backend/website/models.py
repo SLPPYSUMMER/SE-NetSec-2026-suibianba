@@ -3830,6 +3830,16 @@ class Report(models.Model):
         help_text="所属项目",
     )
 
+    # ---- 团队隔离 ----
+    team = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="secguard_reports",
+        null=True,
+        blank=True,
+        help_text="所属团队（数据隔离）",
+    )
+
     # ---- 附加信息 ----
     cve_id = models.CharField(max_length=50, blank=True, default="", help_text="CVE编号")
     affected_url = models.URLField(max_length=500, blank=True, default="", help_text="受影响URL")
@@ -3908,6 +3918,17 @@ class ScanTask(models.Model):
         related_name="secguard_scan_tasks",
         help_text="任务发起人",
     )
+
+    # ---- 团队隔离 ----
+    team = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="secguard_scans",
+        null=True,
+        blank=True,
+        help_text="所属团队（数据隔离）",
+    )
+
     started_at = models.DateTimeField(auto_now_add=True, help_text="任务创建时间")
     finished_at = models.DateTimeField(
         null=True, blank=True, help_text="扫描结束时间"
@@ -3995,6 +4016,17 @@ class AuditLog(models.Model):
     ip_address = models.GenericIPAddressField(
         null=True, blank=True, help_text="操作 IP 地址"
     )
+
+    # ---- 团队隔离 ----
+    team = models.ForeignKey(
+        "Organization",
+        on_delete=models.SET_NULL,
+        related_name="secguard_audit_logs",
+        null=True,
+        blank=True,
+        help_text="所属团队（数据隔离；系统日志可为空）",
+    )
+
     timestamp = models.DateTimeField(auto_now_add=True, help_text="操作时间")
 
     def __str__(self):
@@ -4012,3 +4044,67 @@ class AuditLog(models.Model):
         ]
         verbose_name = "审计日志"
         verbose_name_plural = "审计日志"
+
+
+class TeamMembership(models.Model):
+    """
+    团队成员关系 —— 管理用户与团队(Organization type=team)的从属关系。
+    包含审核机制：pending → approved → rejected
+    """
+
+    class Role(models.TextChoices):
+        ADMIN = "admin", "团队管理员"
+        TEAM_LEAD = "team_lead", "团队负责人"
+        DEVELOPER = "developer", "开发人员"
+        OBSERVER = "observer", "观察者"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "待审核"
+        ACCEPTED = "accepted", "已通过"
+        REJECTED = "rejected", "已拒绝"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="team_memberships",
+    )
+    team = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="memberships",
+        help_text="类型为 team 的 Organization",
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.DEVELOPER,
+        help_text="用户在团队中的角色",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        help_text="审核状态",
+    )
+    joined_at = models.DateTimeField(auto_now_add=True, help_text="加入时间")
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_memberships",
+        help_text="审核人",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [("user", "team")]
+        indexes = [
+            models.Index(fields=["team", "status"]),
+            models.Index(fields=["user", "status"]),
+        ]
+        verbose_name = "团队成员"
+        verbose_name_plural = "团队成员"
+
+    def __str__(self):
+        return f"{self.user.username} → {self.team.name} ({self.get_role_display()})"

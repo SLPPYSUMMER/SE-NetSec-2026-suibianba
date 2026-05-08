@@ -1,49 +1,79 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { mockReportChartData } from '@/services/mockData';
-import {
-  Filter,
-  TrendingUp,
-  Clock,
-  FileText,
-  Download,
-  Eye,
-  CheckSquare,
-} from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
+import { reportApi, SEVERITY_MAP } from '@/services/api';
+import { Filter, TrendingUp, Clock, FileText, Download, Eye, CheckSquare, Loader2 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function ReportsPage() {
-  const [selectedProject, setSelectedProject] = useState('all');
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
-  const [reportOptions, setReportOptions] = useState({
-    trend: true,
-    analysis: true,
-    top10: false,
-  });
+  const [selectedStatus, setSelectedStatus] = useState('all');
+  const [exportFormat, setExportFormat] = useState('pdf');
+  const [loading, setLoading] = useState(false);
+  const [exportData, setExportData] = useState<any>(null);
+  const [previewMode, setPreviewMode] = useState(false);
+
+  const handleExport = async (format: string) => {
+    setExportFormat(format);
+    setLoading(true);
+    try {
+      const params: Record<string, string> = { format };
+      if (selectedStatus !== 'all') params.status = selectedStatus;
+      const data = await reportApi.export(params);
+      setExportData(data);
+      setPreviewMode(true);
+    } catch (err: any) {
+      alert(err.message || '导出失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    setLoading(true);
+    try {
+      const params: Record<string, string> = { format: exportFormat };
+      if (selectedStatus !== 'all') params.status = selectedStatus;
+      const data = await reportApi.export(params);
+      setExportData(data);
+      setPreviewMode(true);
+    } catch (err: any) {
+      alert(err.message || '预览失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!exportData) return;
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `secguard-report-${new Date().toISOString().substring(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const severityChartData = exportData?.items?.length
+    ? Object.entries(
+        (exportData.items as any[]).reduce((acc: Record<string, number>, item: any) => {
+          acc[item.severity] = (acc[item.severity] || 0) + 1;
+          return acc;
+        }, {})
+      ).map(([name, value]) => ({ name, value }))
+    : [];
 
   return (
     <div className="min-h-screen bg-dark-bg">
       <Sidebar />
       <div className="ml-64">
         <Header />
-
         <main className="p-6 space-y-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                SECURITY / REPORTS
-              </p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">SECURITY / REPORTS</p>
               <h1 className="text-3xl font-bold text-white">报告生成</h1>
             </div>
           </div>
@@ -55,35 +85,18 @@ export default function ReportsPage() {
                   <Filter className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-semibold text-white">筛选区域</h3>
                 </div>
-
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      选择项目
-                    </label>
-                    <select
-                      value={selectedProject}
-                      onChange={(e) => setSelectedProject(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer"
-                    >
-                      <option value="all">所有安全资产核心组</option>
-                      <option value="web">Web应用安全</option>
-                      <option value="network">网络安全</option>
-                      <option value="system">系统安全</option>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">按状态筛选</label>
+                    <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
+                      <option value="all">全部状态</option>
+                      <option value="pending">待分派</option>
+                      <option value="processing">处理中</option>
+                      <option value="fixed">已修复</option>
+                      <option value="reviewing">已复核</option>
+                      <option value="closed">已关闭</option>
                     </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      日期范围
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="2023-10-01 至 2023-10-31"
-                      value={`${dateRange.start || '2023-10-01'} 至 ${dateRange.end || '2023-10-31'}`}
-                      onChange={(e) => {}}
-                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary"
-                    />
                   </div>
                 </div>
               </div>
@@ -91,154 +104,162 @@ export default function ReportsPage() {
               <div className="bg-dark-card border border-dark-border rounded-xl p-6">
                 <div className="flex items-center space-x-2 mb-4">
                   <CheckSquare className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-semibold text-white">预览配置</h3>
+                  <h3 className="text-lg font-semibold text-white">导出配置</h3>
                 </div>
-
                 <div className="space-y-3">
-                  {[
-                    { key: 'trend', label: '漏洞趋势', icon: TrendingUp },
-                    { key: 'analysis', label: '修复时长分析', icon: Clock },
-                    { key: 'top10', label: 'Top 10 高危资产', icon: FileText },
-                  ].map((option) => (
-                    <label
-                      key={option.key}
-                      className="flex items-center justify-between p-3 bg-dark-bg rounded-lg hover:bg-dark-hover transition-colors cursor-pointer group"
-                    >
-                      <div className="flex items-center space-x-3">
-                        <option.icon className="w-5 h-5 text-gray-400 group-hover:text-primary transition-colors" />
-                        <span className="text-sm text-gray-300">{option.label}</span>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={reportOptions[option.key as keyof typeof reportOptions]}
-                        onChange={(e) =>
-                          setReportOptions({
-                            ...reportOptions,
-                            [option.key]: e.target.checked,
-                          })
-                        }
-                        className="w-5 h-5 rounded border-dark-border bg-dark-bg text-primary focus:ring-primary focus:ring-offset-0"
-                      />
-                    </label>
-                  ))}
+                  <label className="flex items-center justify-between p-3 bg-dark-bg rounded-lg hover:bg-dark-hover transition-colors cursor-pointer">
+                    <div className="flex items-center space-x-3">
+                      <TrendingUp className="w-5 h-5 text-gray-400" />
+                      <span className="text-sm text-gray-300">漏洞趋势</span>
+                    </div>
+                    <input type="checkbox" defaultChecked className="w-5 h-5 rounded border-dark-border bg-dark-bg text-primary" />
+                  </label>
+                  <label className="flex items-center justify-between p-3 bg-dark-bg rounded-lg hover:bg-dark-hover transition-colors cursor-pointer">
+                    <div className="flex items-center space-x-3">
+                      <Clock className="w-5 h-5 text-gray-400" />
+                      <span className="text-sm text-gray-300">修复状态分析</span>
+                    </div>
+                    <input type="checkbox" defaultChecked className="w-5 h-5 rounded border-dark-border bg-dark-bg text-primary" />
+                  </label>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <button className="px-4 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/20 transition-all flex items-center justify-center space-x-2">
-                  <Download className="w-4 h-4" />
-                  <span>导出 PDF</span>
+                <button onClick={() => handleExport('pdf')} disabled={loading}
+                  className="px-4 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/20 transition-all flex items-center justify-center space-x-2 disabled:opacity-50">
+                  <Download className="w-4 h-4" /><span>导出 PDF</span>
                 </button>
-                <button className="px-4 py-3 bg-dark-bg border border-dark-border text-gray-300 rounded-lg hover:bg-dark-hover transition-all flex items-center justify-center space-x-2">
-                  <FileText className="w-4 h-4" />
-                  <span>导出 HTML</span>
+                <button onClick={() => handleExport('html')} disabled={loading}
+                  className="px-4 py-3 bg-dark-bg border border-dark-border text-gray-300 rounded-lg hover:bg-dark-hover transition-all flex items-center justify-center space-x-2 disabled:opacity-50">
+                  <FileText className="w-4 h-4" /><span>导出 HTML</span>
                 </button>
               </div>
 
-              <button className="w-full py-3 bg-gradient-to-r from-primary to-cyan-400 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all flex items-center justify-center space-x-2">
-                <Eye className="w-5 h-5" />
+              <button onClick={handlePreview} disabled={loading}
+                className="w-full py-3 bg-gradient-to-r from-primary to-cyan-400 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all flex items-center justify-center space-x-2 disabled:opacity-50">
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Eye className="w-5 h-5" />}
                 <span>预览报告</span>
               </button>
 
-              <button className="w-full py-3 bg-dark-bg border border-primary/50 text-primary rounded-lg hover:bg-primary/10 transition-all flex items-center justify-center space-x-2">
-                <Download className="w-5 h-5" />
-                <span>导出实时数据</span>
+              <button onClick={handleDownload} disabled={!exportData}
+                className="w-full py-3 bg-dark-bg border border-primary/50 text-primary rounded-lg hover:bg-primary/10 transition-all flex items-center justify-center space-x-2 disabled:opacity-30">
+                <Download className="w-5 h-5" /><span>下载导出数据</span>
               </button>
             </div>
 
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
                 <div className="p-6 border-b border-dark-border flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                  <div className={`w-2 h-2 ${previewMode ? 'bg-green-500' : 'bg-red-500'} rounded-full animate-pulse`} />
                   <span className="text-sm font-medium text-gray-300 uppercase tracking-wider">
-                    Live Preview Mode
+                    {previewMode ? 'Live Preview Mode' : 'Report Preview (Click Preview)'}
                   </span>
                 </div>
 
-                <div className="p-8 space-y-8">
-                  <div className="text-center py-8 relative">
-                    <div className="absolute inset-0 opacity-10">
-                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-primary rounded-full blur-3xl"></div>
+                {!previewMode ? (
+                  <div className="p-8 text-center">
+                    <div className="w-20 h-20 bg-dark-hover rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Eye className="w-10 h-10 text-gray-500" />
                     </div>
-                    <div className="relative z-10">
-                      <h2 className="text-4xl font-bold text-white mb-3">
-                        安全漏洞月度审计报告
-                      </h2>
-                      <p className="text-gray-400">
-                        资产范围：核心生产集群 | 报告周期：2023/10
-                      </p>
-                    </div>
+                    <p className="text-gray-400">点击左侧"预览报告"按钮查看报告内容</p>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-6">
-                    {[
-                      { label: '关键监测', value: '12', color: 'border-l-red-500' },
-                      { label: '修复中', value: '08', color: 'border-l-yellow-500' },
-                      { label: '已完成', value: '154', color: 'border-l-cyan-500' },
-                    ].map((stat, index) => (
-                      <div
-                        key={index}
-                        className={`bg-dark-bg rounded-lg p-6 border-l-4 ${stat.color}`}
-                      >
-                        <p className="text-sm text-gray-400 mb-2">{stat.label}</p>
-                        <p className="text-4xl font-bold text-white">{stat.value}</p>
+                ) : exportData ? (
+                  <div className="p-8 space-y-8">
+                    <div className="text-center py-8 relative">
+                      <div className="absolute inset-0 opacity-10">
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-primary rounded-full blur-3xl" />
                       </div>
-                    ))}
-                  </div>
-
-                  <div>
-                    <h3 className="text-xl font-semibold text-white mb-4 flex items-center space-x-2">
-                      <span className="w-1 h-6 bg-primary rounded"></span>
-                      <span>漏洞趋势分析</span>
-                    </h3>
-                    <div className="bg-dark-bg rounded-lg p-6">
-                      <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={mockReportChartData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e2433" />
-                            <XAxis dataKey="name" stroke="#6b7280" fontSize={12} />
-                            <YAxis stroke="#6b7280" fontSize={12} />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: '#151922',
-                                border: '1px solid #1e2433',
-                                borderRadius: '8px',
-                              }}
-                            />
-                            <Bar dataKey="value" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                          </BarChart>
-                        </ResponsiveContainer>
+                      <div className="relative z-10">
+                        <h2 className="text-4xl font-bold text-white mb-3">安全漏洞审计报告</h2>
+                        <p className="text-gray-400">报告格式：{exportData.format?.toUpperCase()} | 生成时间：{exportData.generated_at?.substring(0, 19).replace('T', ' ')}</p>
                       </div>
                     </div>
-                  </div>
 
-                  <div>
-                    <h3 className="text-xl font-semibold text-white mb-4">
-                      核心风险摘要
-                    </h3>
-                    <div className="bg-dark-bg rounded-lg p-6">
-                      <p className="text-gray-300 leading-relaxed mb-4">
-                        本周期内，检测到的关键风险主要集中在{' '}
-                        <span className="text-primary font-medium">Log4j 漏洞</span>{' '}
-                        与{' '}
-                        <span className="text-primary font-medium">端口令扫描</span>。
-                        其中，核心生产集群的受影响比例较上月下降了{' '}
-                        <span className="text-green-400 font-medium">12%</span>。
-                        建议在接下来的72小时内完成剩余{' '}
-                        <span className="text-orange-400 font-medium">8 项高危任务</span>{' '}
-                        的补丁部署。
-                      </p>
-                      <div className="flex items-center justify-end space-x-2 pt-4 border-t border-dark-border">
-                        <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
-                          <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                    <div className="grid grid-cols-3 gap-6">
+                      {[
+                        { label: '待处理', value: exportData.summary?.pending ?? '--', color: 'border-l-red-500' },
+                        { label: '修复中', value: exportData.summary?.processing ?? '--', color: 'border-l-yellow-500' },
+                        { label: '已关闭', value: exportData.summary?.closed ?? '--', color: 'border-l-cyan-500' },
+                      ].map((stat, i) => (
+                        <div key={i} className={`bg-dark-bg rounded-lg p-6 border-l-4 ${stat.color}`}>
+                          <p className="text-sm text-gray-400 mb-2">{stat.label}</p>
+                          <p className="text-4xl font-bold text-white">{stat.value}</p>
                         </div>
-                        <span className="text-sm text-gray-400">
-                          2 位安全专家正在审阅
-                        </span>
+                      ))}
+                    </div>
+
+                    <div>
+                      <h3 className="text-xl font-semibold text-white mb-4 flex items-center space-x-2">
+                        <span className="w-1 h-6 bg-primary rounded" />
+                        <span>漏洞统计概览</span>
+                      </h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-dark-bg rounded-lg p-6">
+                          <p className="text-sm text-gray-400 mb-1">漏洞总数</p>
+                          <p className="text-3xl font-bold text-white">{exportData.summary?.total ?? 0}</p>
+                        </div>
+                        <div className="bg-dark-bg rounded-lg p-6">
+                          <p className="text-sm text-gray-400 mb-1">修复率</p>
+                          <p className="text-3xl font-bold text-green-400">{exportData.summary?.fix_rate ?? '0%'}</p>
+                        </div>
+                      </div>
+                      {severityChartData.length > 0 && (
+                        <div className="bg-dark-bg rounded-lg p-6 mt-4">
+                          <h4 className="text-sm font-medium text-gray-400 mb-4">严重程度分布</h4>
+                          <div className="h-48">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={severityChartData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#1e2433" />
+                                <XAxis dataKey="name" stroke="#6b7280" fontSize={12} />
+                                <YAxis stroke="#6b7280" fontSize={12} />
+                                <Tooltip contentStyle={{ backgroundColor: '#151922', border: '1px solid #1e2433', borderRadius: '8px' }} />
+                                <Bar dataKey="value" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h3 className="text-xl font-semibold text-white mb-4">漏洞明细</h3>
+                      <div className="bg-dark-bg rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-dark-border text-left">
+                              <th className="px-4 py-3 text-gray-400">编号</th>
+                              <th className="px-4 py-3 text-gray-400">标题</th>
+                              <th className="px-4 py-3 text-gray-400">严重程度</th>
+                              <th className="px-4 py-3 text-gray-400">状态</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-dark-border">
+                            {exportData.items?.slice(0, 10).map((item: any, i: number) => (
+                              <tr key={i} className="text-gray-300">
+                                <td className="px-4 py-2 font-mono text-primary">{item.vuln_id}</td>
+                                <td className="px-4 py-2">{item.title}</td>
+                                <td className="px-4 py-2">{SEVERITY_MAP[item.severity]?.label || item.severity}</td>
+                                <td className="px-4 py-2">{item.status}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
+
+                    <div className="flex items-center justify-end space-x-2 pt-4 border-t border-dark-border">
+                      <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
+                        <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
+                      </div>
+                      <span className="text-sm text-gray-400">安全报告由 SecGuard 生成</span>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-8 text-center text-gray-400">
+                    <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
+                    加载中...
+                  </div>
+                )}
               </div>
             </div>
           </div>

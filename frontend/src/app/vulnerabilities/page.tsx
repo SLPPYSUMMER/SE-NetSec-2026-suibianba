@@ -28,8 +28,8 @@ export default function VulnerabilitiesPage() {
       if (statusFilter !== 'all') params.status = statusFilter;
       if (searchTerm) params.search = searchTerm;
       const data = await reportApi.list(params);
-      setReports(Array.isArray(data) ? data : []);
-      setTotal(Array.isArray(data) ? data.length : 0);
+      setReports(Array.isArray(data.items) ? data.items : []);
+      setTotal(data.total_count || 0);
     } catch (err: any) {
       setError(err.message);
     } finally {
