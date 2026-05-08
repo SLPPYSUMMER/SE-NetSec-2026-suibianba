@@ -14,22 +14,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    container_name: secguard-postgres-db
+    container_name: secguard-db
     restart: always
 
-  app:
+  backend:
     build: ./backend
     depends_on:
       db:
         condition: service_healthy
-    container_name: secguard-app
+    container_name: secguard-backend
     restart: on-failure
     env_file:
       - ./backend/.env
-    volumes:
-      - ./backend:/blt
     ports:
-      - "8001:8000"
+      - "8000:8000"
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
       - POSTGRES_PASSWORD=postgres
@@ -40,15 +38,15 @@ services:
     build:
       context: ./frontend
       args:
-        BACKEND_URL: http://app:8000
+        BACKEND_URL: http://backend:8000
     depends_on:
-      - app
+      - backend
     container_name: secguard-frontend
     restart: on-failure
     ports:
       - "3000:3000"
     environment:
-      - BACKEND_URL=http://app:8000
+      - BACKEND_URL=http://backend:8000
 
 volumes:
   postgres_db:

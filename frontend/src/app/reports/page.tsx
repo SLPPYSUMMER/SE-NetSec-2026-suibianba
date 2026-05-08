@@ -153,7 +153,7 @@ export default function ReportsPage() {
                     <div className="w-20 h-20 bg-dark-hover rounded-full flex items-center justify-center mx-auto mb-4">
                       <Eye className="w-10 h-10 text-gray-500" />
                     </div>
-                    <p className="text-gray-400">点击左侧"预览报告"按钮查看</p>
+                    <p className="text-gray-400">点击左侧&ldquo;预览报告&rdquo;按钮查看</p>
                   </div>
                 ) : exportData ? (
                   <div className="p-8 space-y-8">

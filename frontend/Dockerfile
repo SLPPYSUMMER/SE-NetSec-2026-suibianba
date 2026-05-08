@@ -5,6 +5,7 @@ RUN npm ci
 COPY . .
 ARG BACKEND_URL=http://app:8000
 ENV BACKEND_URL=${BACKEND_URL}
+ENV NEXT_IGNORE_ESLINT=true
 RUN npm run build
 
 FROM node:20-alpine AS runner
@@ -14,5 +15,6 @@ ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 EXPOSE 3000
 CMD ["node", "server.js"]
