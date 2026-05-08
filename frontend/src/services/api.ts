@@ -68,8 +68,30 @@ export const reportApi = {
     request<any>(`/reports/${vulnId}/transition`, { method: 'POST', body: JSON.stringify({ action, comment }) }),
   auditLogs: (vulnId: string) => request<any[]>(`/reports/${vulnId}/audit-logs`),
   checkDuplicate: (data: any) => request<any>('/reports/check-duplicate', { method: 'POST', body: JSON.stringify(data) }),
-  export: (params?: Record<string, string>) =>
-    request<any>('/reports-export', { method: 'POST', body: JSON.stringify(params || { format: 'pdf' }) }),
+  export: async (params?: Record<string, string>, download?: boolean) => {
+    const res = await fetch(`${API_BASE}/reports-export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(params || { format: 'pdf' }),
+    });
+    if (!res.ok) {
+      let msg = '导出失败';
+      try { const e = await res.json(); msg = e.detail || msg; } catch {}
+      throw new Error(msg);
+    }
+    if (download) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `secguard-report-${new Date().toISOString().substring(0, 10)}.${params?.format === 'html' ? 'html' : 'html'}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return { items: [], total_count: 0, summary: {} };
+    }
+    return res.json();
+  },
 };
 
 export const statsApi = {

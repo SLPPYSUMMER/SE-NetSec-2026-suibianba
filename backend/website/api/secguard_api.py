@@ -21,7 +21,7 @@ from ninja import Query
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.db.models import Q
 
 from website.models import (
@@ -57,8 +57,8 @@ router = Router(tags=["SecGuard"])
 # ==============================================================================
 
 class LoginSchema(BaseModel):
-    username: str = Field(..., description="用户名", min_length=3, max_length=150)
-    password: str = Field(..., description="密码", min_length=6)
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码")
 
 
 class LoginResponse(BaseModel):
@@ -83,13 +83,14 @@ class UserSchema(BaseModel):
 
 
 class ReportCreateSchema(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255, description="漏洞标题")
-    description: str = Field(..., min_length=10, description="漏洞详细描述")
+    title: str = Field(..., description="漏洞标题")
+    description: str = Field(..., description="漏洞详细描述")
     severity: str = Field("medium", description="严重程度: critical/high/medium/low")
     project_id: int = Field(..., description="所属项目ID")
-    cve_id: Optional[str] = Field(None, max_length=50, description="CVE编号（可选）")
+    cve_id: Optional[str] = Field(None, description="CVE编号（可选）")
     affected_url: Optional[str] = Field(None, description="受影响的URL")
     reproduction_steps: Optional[str] = Field(None, description="复现步骤")
+    assignee_id: Optional[int] = Field(None, description="指派处理人ID")
 
     @validator('severity')
     def validate_severity(cls, v):
@@ -152,15 +153,12 @@ class ReportDetailSchema(BaseModel):
 
 class AssignReportSchema(BaseModel):
     assignee_id: int = Field(..., description="被分派的用户ID")
-    comment: Optional[str] = Field(None, max_length=500, description="分派备注")
+    comment: Optional[str] = Field(None, description="分派备注")
 
 
 class StatusTransitionSchema(BaseModel):
-    action: str = Field(
-        ...,
-        description="操作类型: submit_fix/confirm_review/close/reopen"
-    )
-    comment: Optional[str] = Field(None, max_length=1000, description="操作备注/修复说明")
+    action: str = Field(..., description="操作类型: submit_fix/confirm_review/close/reopen")
+    comment: Optional[str] = Field(None, description="操作备注/修复说明")
 
     @validator('action')
     def validate_action(cls, v):
@@ -471,11 +469,11 @@ def api_get_current_user(request: HttpRequest):
 
 
 class RegisterSchema(BaseModel):
-    username: str = Field(..., min_length=3, max_length=150, description="用户名")
-    password: str = Field(..., min_length=6, max_length=128, description="密码")
-    email: Optional[str] = Field(None, max_length=254, description="邮箱（可选）")
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码")
+    email: Optional[str] = Field(None, description="邮箱（可选）")
     team_action: Optional[str] = Field(None, description="团队操作: create 创建团队 / join 加入团队")
-    team_name: Optional[str] = Field(None, max_length=255, description="创建团队时的团队名称")
+    team_name: Optional[str] = Field(None, description="创建团队时的团队名称")
     team_id: Optional[int] = Field(None, description="加入团队时的团队ID")
 
 
@@ -613,12 +611,25 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
     if not request.user.is_authenticated:
         raise ValueError("请先登录后提交漏洞报告")
 
+    if not payload.title.strip():
+        raise ValueError("请输入漏洞标题")
+    if not payload.description.strip():
+        raise ValueError("请输入漏洞描述")
+    if len(payload.description.strip()) < 10:
+        raise ValueError("漏洞描述至少需要10个字符")
+
     try:
         project = Project.objects.get(id=payload.project_id)
     except Project.DoesNotExist:
         raise ValueError(f"项目ID {payload.project_id} 不存在，请选择有效的项目")
 
-    # 执行去重检测（如果可用）
+    assignee = None
+    if payload.assignee_id:
+        try:
+            assignee = User.objects.get(id=payload.assignee_id)
+        except User.DoesNotExist:
+            raise ValueError("指定的处理人不存在")
+
     duplicate_result = check_report_duplicates(
         title=payload.title,
         description=payload.description,
@@ -639,8 +650,9 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         title=payload.title,
         description=payload.description,
         severity=payload.severity,
-        status=Report.Status.PENDING,
+        status=Report.Status.PENDING if not assignee else Report.Status.PROCESSING,
         reporter=request.user,
+        assignee=assignee,
         project=project,
         team=set_request_team(request),
         cve_id=payload.cve_id or "",
@@ -1210,12 +1222,13 @@ class ExportSchema(BaseModel):
     status: Optional[str] = Field(None, description="状态筛选")
 
 
-@router.post("/reports-export")
+@router.post("/reports-export", auth=None)
 def export_reports(request: HttpRequest, payload: ExportSchema):
     if not request.user.is_authenticated:
         raise ValueError("请先登录")
 
     queryset = Report.objects.all()
+    queryset = filter_by_team(queryset, request)
     if payload.project_id:
         queryset = queryset.filter(project_id=payload.project_id)
     if payload.status:
@@ -1223,60 +1236,102 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
 
     reports = queryset.select_related('reporter', 'assignee', 'project').order_by('-created_at')
 
-    items = []
-    for r in reports:
-        items.append({
-            "vuln_id": r.vuln_id,
-            "title": r.title,
-            "severity": r.severity,
-            "status": r.status,
-            "reporter": r.reporter.username if r.reporter else "",
-            "assignee": r.assignee.username if r.assignee else "",
-            "project": r.project.name if r.project else "",
-            "created_at": r.created_at.isoformat(),
-        })
-
     total = queryset.count()
     pending = queryset.filter(status=Report.Status.PENDING).count()
     processing = queryset.filter(status=Report.Status.PROCESSING).count()
     fixed = queryset.filter(status=Report.Status.FIXED).count()
     reviewing = queryset.filter(status=Report.Status.REVIEWING).count()
     closed = queryset.filter(status=Report.Status.CLOSED).count()
+    fix_rate = f"{(fixed + closed) / total * 100:.1f}%" if total > 0 else "0%"
 
-    return {
-        "format": payload.format,
-        "generated_at": datetime.now().isoformat(),
-        "summary": {
-            "total": total, "pending": pending, "processing": processing,
-            "fixed": fixed, "reviewing": reviewing, "closed": closed,
-            "fix_rate": f"{(fixed + closed) / total * 100:.1f}%" if total > 0 else "0%",
-        },
-        "items": items,
-    }
+    sev_map = {"critical": "严重", "high": "高危", "medium": "中危", "low": "低危"}
+    sta_map = {"pending": "待分派", "processing": "处理中", "fixed": "已修复", "reviewing": "已复核", "closed": "已关闭"}
 
+    rows = ""
+    for r in reports:
+        rows += f"""<tr>
+            <td>{r.vuln_id}</td><td>{r.title}</td><td>{sev_map.get(r.severity, r.severity)}</td>
+            <td>{sta_map.get(r.status, r.status)}</td><td>{r.reporter.username if r.reporter else ''}</td>
+            <td>{r.assignee.username if r.assignee else ''}</td><td>{r.created_at.strftime('%Y-%m-%d')}</td>
+        </tr>"""
 
-# Asset endpoint - aggregate from ScanTask targets and Reports
-@router.get("/assets")
-def list_assets(request: HttpRequest):
-    if not request.user.is_authenticated:
-        raise ValueError("请先登录")
-    scan_targets = ScanTask.objects.values('target').distinct()
-    affected_urls = Report.objects.exclude(affected_url="").values('affected_url').distinct()
+    html = f"""<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><title>SecGuard 安全审计报告</title>
+<style>
+    body{{font-family:'Microsoft YaHei',sans-serif;max-width:960px;margin:40px auto;color:#1a1a2e;}}
+    h1{{color:#0ea5e9;border-bottom:2px solid #0ea5e9;padding-bottom:10px;}}
+    .summary{{display:flex;gap:16px;flex-wrap:wrap;margin:20px 0;}}
+    .card{{border-left:4px solid #0ea5e9;background:#f0f9ff;padding:12px 20px;border-radius:8px;flex:1;min-width:120px;}}
+    .card .num{{font-size:32px;font-weight:bold;}}
+    table{{width:100%;border-collapse:collapse;margin-top:20px;}}
+    th,td{{border:1px solid #e2e8f0;padding:10px;text-align:left;font-size:14px;}}
+    th{{background:#0ea5e9;color:#fff;}}
+    tr:nth-child(even){{background:#f8fafc;}}
+    .footer{{margin-top:40px;font-size:12px;color:#94a3b8;text-align:center;}}
+</style></head>
+<body>
+<h1>🔒 SecGuard 安全漏洞审计报告</h1>
+<p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 格式: {payload.format.upper()}</p>
+<div class="summary">
+    <div class="card"><div>漏洞总数</div><div class="num">{total}</div></div>
+    <div class="card"><div>待处理</div><div class="num">{pending}</div></div>
+    <div class="card"><div>处理中</div><div class="num">{processing}</div></div>
+    <div class="card"><div>已修复</div><div class="num">{fixed}</div></div>
+    <div class="card"><div>修复率</div><div class="num">{fix_rate}</div></div>
+</div>
+<table><thead><tr><th>编号</th><th>标题</th><th>严重程度</th><th>状态</th><th>报告人</th><th>处理人</th><th>日期</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<p class="footer">SecGuard Sentinel — 漏洞管理与跟踪平台 | 数据基于团队权限导出</p>
+</body></html>"""
+
+    if payload.format == "html":
+        resp = HttpResponse(html, content_type="text/html; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="secguard-report-{datetime.now().strftime("%Y%m%d")}.html"'
+        return resp
+    elif payload.format == "pdf":
+        resp = HttpResponse(html, content_type="text/html; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="secguard-report-{datetime.now().strftime("%Y%m%d")}.html"'
+        return resp
+    else:
+        items = []
+        for r in reports:
+            items.append({
+                "vuln_id": r.vuln_id, "title": r.title, "severity": r.severity,
+                "status": r.status, "reporter": r.reporter.username if r.reporter else "",
+                "assignee": r.assignee.username if r.assignee else "",
+                "project": r.project.name if r.project else "", "created_at": r.created_at.isoformat(),
+            })
+        return {
+            "format": payload.format, "generated_at": datetime.now().isoformat(),
+            "summary": {"total": total, "pending": pending, "processing": processing, "fixed": fixed, "reviewing": reviewing, "closed": closed, "fix_rate": fix_rate},
+            "items": items,
+        }
+
+    if request.user.is_staff:
+        scan_targets = ScanTask.objects.values('target').distinct()
+        affected_urls = Report.objects.exclude(affected_url="").values('affected_url').distinct()
+    else:
+        team, _ = get_user_team(request)
+        if team is None:
+            return {"items": [], "total_count": 0}
+        scan_targets = ScanTask.objects.filter(team=team).values('target').distinct()
+        affected_urls = Report.objects.filter(team=team).exclude(affected_url="").values('affected_url').distinct()
 
     urls = set()
-    for t in scan_targets:
-        url = t['target']
-        if url:
-            urls.add(url)
-    for r in affected_urls:
-        url = r['affected_url']
-        if url:
-            urls.add(url)
+    for t in scan_targets: urls.add(t['target'])
+    for r in affected_urls: urls.add(r['affected_url'])
 
     assets = []
     for url in urls:
-        vuln_count = Report.objects.filter(affected_url=url).count()
-        last_scan = ScanTask.objects.filter(target=url).order_by('-started_at').first()
+        if not url: continue
+        if request.user.is_staff:
+            vuln_count = Report.objects.filter(affected_url=url).count()
+            last_scan = ScanTask.objects.filter(target=url).order_by('-started_at').first()
+        else:
+            team, _ = get_user_team(request)
+            vuln_count = Report.objects.filter(affected_url=url, team=team).count() if team else 0
+            last_scan = ScanTask.objects.filter(target=url, team=team).order_by('-started_at').first() if team else None
         assets.append({
             "id": abs(hash(url)) % 10000,
             "name": url,

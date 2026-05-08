@@ -24,6 +24,8 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!username.trim()) { setError('请输入用户名'); return; }
+    if (!password) { setError('请输入密码'); return; }
     setLoading(true);
     try {
       await login(username, password);

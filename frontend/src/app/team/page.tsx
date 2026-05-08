@@ -130,7 +130,7 @@ export default function TeamPage() {
         <main className="p-6 space-y-6">
           <div>
             <h1 className="text-3xl font-bold text-white">团队管理</h1>
-            <p className="text-sm text-gray-400 mt-1">{user.team_name} — 您的角色: {user.role}</p>
+            <p className="text-sm text-gray-400 mt-1">{user.team_name} — 团队ID: <span className="text-primary font-mono">{user.team_id}</span> — 您的角色: {user.role}</p>
           </div>
 
           {actionMsg && (
