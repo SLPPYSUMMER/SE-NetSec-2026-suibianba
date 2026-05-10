@@ -24,9 +24,9 @@ RUN pip install django-cors-headers 2>/dev/null || true
 
 # Install OWASP Nettacker - automated penetration testing tool
 # global pip index is already set to Tsinghua mirror on line 17
-RUN pip install owasp-nettacker || \
+RUN pip install nettacker --index-url https://pypi.org/simple/ || \
     pip install git+https://github.com/OWASP/Nettacker.git || \
-    echo "Warning: owasp-nettacker installation failed, scan feature may not work"
+    echo "Warning: nettacker installation failed, scan feature may not work"
 
 # Verify nettacker is usable (CLI or at least importable)
 RUN nettacker --help 2>/dev/null || python -m nettacker --help 2>/dev/null || \

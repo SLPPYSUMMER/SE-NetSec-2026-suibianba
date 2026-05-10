@@ -1,5 +1,5 @@
 """Nettacker 扫描器集成 - 自动扫描任务执行器"""
-import subprocess, threading, logging, os, json, time, glob, shutil
+import subprocess, threading, logging, os, json, glob, shutil
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -14,8 +14,9 @@ def _find_nettacker():
     """Return the usable nettacker invocation as a list of args."""
     for candidate in ([NETTACKER_CMD], ["python", "-m", "nettacker"]):
         try:
-            subprocess.run(candidate + ["--help"], capture_output=True, timeout=10)
-            return candidate
+            result = subprocess.run(candidate + ["--help"], capture_output=True, timeout=10)
+            if result.returncode == 0:
+                return candidate
         except (FileNotFoundError, subprocess.TimeoutExpired):
             continue
     raise FileNotFoundError("nettacker CLI not found, tried: nettacker, python -m nettacker")
@@ -36,9 +37,8 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
         detail=f"开始扫描 {target} (类型: {scanner_type})", team=task.team,
     )
 
-    # deep → 全模块扫描, quick → 端口+子域名
-    profile_map = {"deep": "all", "quick": "port_scan,subdomain_scan"}
-    modules = profile_map.get(scanner_type, "all")
+    # deep → 全模块, quick → scan profile (port/subdomain/admin/dir等发现类扫描)
+    scan_args = ["-m", "all"] if scanner_type == "deep" else ["--profile", "scan"]
 
     timeout = QUICK_SCAN_TIMEOUT if scanner_type == "quick" else MAX_SCAN_TIMEOUT
 
@@ -46,39 +46,71 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    output_file = os.path.join(OUTPUT_DIR, "results.json")
     nettacker_bin = _find_nettacker()
-    cmd = nettacker_bin + [
-        "-m", modules,
+    cmd = nettacker_bin + scan_args + [
         "-i", target,
-        "--report-path", OUTPUT_DIR,
-        "--report-format", "json",
+        "-o", output_file,
+        "-d",
     ]
 
     logger.info(f"Running Nettacker via '{' '.join(nettacker_bin)}': {' '.join(cmd[len(nettacker_bin):])}")
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if proc.returncode != 0:
+            logger.error(f"Nettacker exited with code {proc.returncode}: {proc.stderr[:500]}")
         findings = []
 
-        # 从 JSON 输出文件解析结果
-        for jf in sorted(glob.glob(os.path.join(OUTPUT_DIR, "**/*.json"), recursive=True)):
+        # 从 JSON 输出文件解析结果 (Nettacker 0.4.0 格式)
+        for jf in [output_file] + sorted(glob.glob(os.path.join(OUTPUT_DIR, "**/*.json"), recursive=True)):
+            if not os.path.isfile(jf):
+                continue
             try:
                 with open(jf, encoding="utf-8") as f:
                     data = json.load(f)
-                entries = data if isinstance(data, list) else data.get("results", [])
+                entries = data if isinstance(data, list) else data.get("results", data.get("events", []))
                 for entry in entries:
                     if not isinstance(entry, dict):
                         continue
-                    title = entry.get("description") or entry.get("name") or entry.get("vulnerability", "Nettacker 发现")
+                    # 解析 json_event 嵌套信息
+                    extra = {}
+                    je = entry.get("json_event", "")
+                    if isinstance(je, str) and je.strip():
+                        try:
+                            extra = json.loads(je)
+                        except json.JSONDecodeError:
+                            pass
+                    resp = extra.get("response", {}) if isinstance(extra, dict) else {}
+                    cond_results = resp.get("conditions_results", {}) if isinstance(resp, dict) else {}
+
+                    # 从 conditions_results 提取更有意义的标题
+                    vuln_details = []
+                    for cond_key, cond_vals in cond_results.items():
+                        if cond_key != "open_port" and cond_vals:
+                            vuln_details.append(f"{cond_key}: {', '.join(str(v) for v in cond_vals)}")
+
+                    title = entry.get("event") or entry.get("module_name") or "Nettacker 发现"
+                    if len(title) > 200:
+                        title = title[:200] + "..."
+
+                    severity = _map_severity(entry.get("severity", "medium"))
+
+                    description_parts = [
+                        f"模块: {entry.get('module_name', 'N/A')}",
+                        f"目标: {entry.get('target', target)}",
+                        f"端口: {entry.get('port', 'N/A')}",
+                    ]
+                    if vuln_details:
+                        description_parts.append("检测结果:")
+                        description_parts.extend(vuln_details)
+                    if extra:
+                        description_parts.append(f"详情: {json.dumps(extra, ensure_ascii=False)[:1000]}")
+
                     findings.append({
                         "title": str(title),
-                        "severity": _map_severity(entry.get("risk") or entry.get("severity", "medium")),
-                        "description": (
-                            f"模块: {entry.get('module_name', 'N/A')}\n"
-                            f"端口: {entry.get('port', 'N/A')}\n"
-                            f"协议: {entry.get('protocol', 'N/A')}\n"
-                            f"{entry.get('description', entry.get('details', ''))}"
-                        ),
+                        "severity": severity,
+                        "description": "\n".join(description_parts)[:2000],
                         "target": entry.get("target") or target,
                     })
             except (json.JSONDecodeError, FileNotFoundError, OSError):
