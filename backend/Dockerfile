@@ -3,7 +3,7 @@
 ENV PYTHONUNBUFFERED=1
 WORKDIR /blt
 
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y postgresql-client libpq-dev \
     libmemcached11 libmemcachedutil2 libmemcached-dev libz-dev \
@@ -14,22 +14,24 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && pip install poetry==2.2.1
-RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+RUN pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/simple/
 RUN poetry config virtualenvs.create false
-RUN poetry source add --priority=default mirrors https://mirrors.aliyun.com/pypi/simple/ 2>/dev/null || true
+RUN poetry source add --priority=default mirrors https://mirrors.tuna.tsinghua.edu.cn/pypi/simple/ 2>/dev/null || true
 COPY pyproject.toml poetry.lock* ./
 RUN pip uninstall -y httpx || true
 RUN poetry lock 2>/dev/null || true && poetry install --no-root --no-interaction || (poetry lock && poetry install --no-root --no-interaction)
 RUN pip install django-cors-headers 2>/dev/null || true
 
 # Install OWASP Nettacker - automated penetration testing tool
-RUN pip install owasp-nettacker --index-url https://mirrors.aliyun.com/pypi/simple/ || \
+# global pip index is already set to Tsinghua mirror on line 17
+RUN pip install owasp-nettacker || \
     pip install git+https://github.com/OWASP/Nettacker.git || \
     echo "Warning: owasp-nettacker installation failed, scan feature may not work"
 
-# Verify nettacker command is available
-RUN nettacker --help 2>/dev/null || python -c "from nettacker import __version__; print('nettaker OK')" 2>/dev/null || \
-    echo "Note: nettacker CLI not available, scanner will use fallback mode"
+# Verify nettacker is usable (CLI or at least importable)
+RUN nettacker --help 2>/dev/null || python -m nettacker --help 2>/dev/null || \
+    python -c "import nettacker; print('nettacker module OK')" 2>/dev/null || \
+    echo "Note: nettacker not available, scanner will use fallback"
 
 FROM python:3.11.2-slim
 ENV PYTHONUNBUFFERED=1
@@ -38,7 +40,7 @@ WORKDIR /blt
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y postgresql-client libpq-dev \
     libmemcached11 libmemcachedutil2 \
