@@ -3933,6 +3933,7 @@ class ScanTask(models.Model):
     finished_at = models.DateTimeField(
         null=True, blank=True, help_text="扫描结束时间"
     )
+    findings_count = models.IntegerField(default=0, help_text="发现漏洞数量")
 
     def __str__(self):
         return f"[{self.get_status_display()}] {self.name} -> {self.target}"

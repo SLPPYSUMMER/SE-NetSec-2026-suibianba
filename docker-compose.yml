@@ -44,7 +44,7 @@ services:
     container_name: secguard-frontend
     restart: on-failure
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - BACKEND_URL=http://backend:8000
 

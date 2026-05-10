@@ -1138,13 +1138,21 @@ def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
         team=set_request_team(request),
         created_by=request.user,
     )
+
+    try:
+        from website.scanner import launch_scan_async
+        launch_scan_async(task)
+        message = "扫描任务已创建，正在后台执行"
+    except ImportError:
+        message = "扫描任务已创建（扫描器不可用）"
+
     return {
         "id": task.id,
         "scan_id": f"SC-{task.id:04d}",
         "target": task.target,
         "status": task.status,
         "scanner_type": task.scanner_type,
-        "message": "扫描任务已创建"
+        "message": message
     }
 
 

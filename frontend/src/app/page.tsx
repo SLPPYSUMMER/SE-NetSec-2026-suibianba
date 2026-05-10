@@ -71,7 +71,7 @@ export default function LoginPage() {
             className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center space-x-2 ${tab === 'login' ? 'bg-primary text-white shadow-lg shadow-primary/25' : 'text-gray-400 hover:text-white'}`}>
             <LogIn className="w-4 h-4" /><span>登录</span>
           </button>
-          <button onClick={() => { setTab('register'); setError(''); }}
+          <button onClick={() => { setTab('register'); setError(''); setUsername(''); setPassword(''); setConfirmPassword(''); setEmail(''); }}
             className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center space-x-2 ${tab === 'register' ? 'bg-primary text-white shadow-lg shadow-primary/25' : 'text-gray-400 hover:text-white'}`}>
             <UserPlus className="w-4 h-4" /><span>注册</span>
           </button>
