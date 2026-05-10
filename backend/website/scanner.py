@@ -1,5 +1,5 @@
 """Nettacker 扫描器集成 - 自动扫描任务执行器"""
-import subprocess, threading, logging, os, json, time
+import subprocess, threading, logging, os, json, time, glob, shutil
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -7,11 +7,11 @@ logger = logging.getLogger(__name__)
 NETTACKER_CMD = os.environ.get("NETTACKER_CMD", "nettacker")
 MAX_SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT", "1800"))
 QUICK_SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT_QUICK", "600"))
+OUTPUT_DIR = "/tmp/nettacker_results"
 
 
 def run_scan(scan_task_id: int, target: str, scanner_type: str):
     """后台执行 Nettacker 扫描"""
-    # 延迟导入避免循环依赖
     from website.models import ScanTask, Report, AuditLog, Project
     from django.contrib.auth.models import User
 
@@ -25,39 +25,59 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
         detail=f"开始扫描 {target} (类型: {scanner_type})", team=task.team,
     )
 
-    profile_map = {"deep": "full_scan", "quick": "quick_scan"}
-    profile = profile_map.get(scanner_type, "full_scan")
+    # deep → 全模块扫描, quick → 端口+子域名
+    profile_map = {"deep": "all", "quick": "port_scan,subdomain_scan"}
+    modules = profile_map.get(scanner_type, "all")
 
     timeout = QUICK_SCAN_TIMEOUT if scanner_type == "quick" else MAX_SCAN_TIMEOUT
 
+    # 清理并创建输出目录
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
     cmd = [
-        NETTACKER_CMD, "-m", profile, "-t", target,
-        "-o", "/tmp/nettacker_result.json", "--output-format", "json"
+        NETTACKER_CMD,
+        "-m", modules,
+        "-i", target,
+        "--report-path", OUTPUT_DIR,
+        "--report-format", "json",
     ]
+
+    logger.info(f"Running Nettacker: {' '.join(cmd)}")
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         findings = []
 
-        if os.path.exists("/tmp/nettacker_result.json"):
+        # 从 JSON 输出文件解析结果
+        for jf in sorted(glob.glob(os.path.join(OUTPUT_DIR, "**/*.json"), recursive=True)):
             try:
-                with open("/tmp/nettacker_result.json") as f:
+                with open(jf, encoding="utf-8") as f:
                     data = json.load(f)
-                for entry in data if isinstance(data, list) else []:
+                entries = data if isinstance(data, list) else data.get("results", [])
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    title = entry.get("description") or entry.get("name") or entry.get("vulnerability", "Nettacker 发现")
                     findings.append({
-                        "title": entry.get("description", entry.get("name", "Nettacker Finding")),
-                        "severity": _map_severity(entry.get("risk", "medium")),
-                        "description": f"{entry.get('description', '')}\n端口: {entry.get('port', 'N/A')}\n协议: {entry.get('protocol', 'N/A')}",
-                        "target": entry.get("target", target),
+                        "title": str(title),
+                        "severity": _map_severity(entry.get("risk") or entry.get("severity", "medium")),
+                        "description": (
+                            f"模块: {entry.get('module_name', 'N/A')}\n"
+                            f"端口: {entry.get('port', 'N/A')}\n"
+                            f"协议: {entry.get('protocol', 'N/A')}\n"
+                            f"{entry.get('description', entry.get('details', ''))}"
+                        ),
+                        "target": entry.get("target") or target,
                     })
-            except (json.JSONDecodeError, FileNotFoundError):
-                pass
+            except (json.JSONDecodeError, FileNotFoundError, OSError):
+                continue
 
-        # 解析 stdout 作为兜底
+        # 兜底：解析 stdout
         if not findings and proc.stdout:
             lines = proc.stdout.strip().split("\n")
             for line in lines[:100]:
-                if "found" in line.lower() or "vuln" in line.lower() or "open port" in line.lower():
+                if any(kw in line.lower() for kw in ("found", "vuln", "open port", "discovered", "[+]")):
                     findings.append({
                         "title": line[:200],
                         "severity": "medium",
@@ -98,7 +118,7 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
         task.save()
         AuditLog.objects.create(
             user=task.created_by, action='SCAN_FAILED', target_type='ScanTask',
-            target_id=str(task.id), detail="扫描超时 (30分钟)", team=task.team,
+            target_id=str(task.id), detail=f"扫描超时 ({timeout // 60}分钟)", team=task.team,
         )
 
     except Exception as e:
