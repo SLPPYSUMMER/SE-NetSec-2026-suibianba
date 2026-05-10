@@ -89,9 +89,7 @@ export default function ScansPage() {
             <div className="bg-dark-card border-l-4 border-l-yellow-500 rounded-lg p-6">
               <p className="text-sm text-gray-400 mb-2">已集成引擎</p>
               <div className="flex flex-wrap gap-2 mt-3">
-                {['Nettacker', 'OWASP ZAP', 'Nuclei'].map((e) => (
-                  <span key={e} className="px-3 py-1 bg-dark-bg border border-dark-border rounded text-xs text-gray-300">{e}</span>
-                ))}
+                <span className="px-3 py-1 bg-dark-bg border border-dark-border rounded text-xs text-gray-300">Nettacker</span>
               </div>
             </div>
           </div>
@@ -115,7 +113,6 @@ export default function ScansPage() {
                     className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
                     <option value="deep">深度扫描 (Deep)</option>
                     <option value="quick">快速扫描 (Quick)</option>
-                    <option value="custom">自定义 (Custom)</option>
                   </select>
                 </div>
               </div>
