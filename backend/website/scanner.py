@@ -10,6 +10,17 @@ QUICK_SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT_QUICK", "600"))
 OUTPUT_DIR = "/tmp/nettacker_results"
 
 
+def _find_nettacker():
+    """Return the usable nettacker invocation as a list of args."""
+    for candidate in ([NETTACKER_CMD], ["python", "-m", "nettacker"]):
+        try:
+            subprocess.run(candidate + ["--help"], capture_output=True, timeout=10)
+            return candidate
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    raise FileNotFoundError("nettacker CLI not found, tried: nettacker, python -m nettacker")
+
+
 def run_scan(scan_task_id: int, target: str, scanner_type: str):
     """后台执行 Nettacker 扫描"""
     from website.models import ScanTask, Report, AuditLog, Project
@@ -35,15 +46,15 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    cmd = [
-        NETTACKER_CMD,
+    nettacker_bin = _find_nettacker()
+    cmd = nettacker_bin + [
         "-m", modules,
         "-i", target,
         "--report-path", OUTPUT_DIR,
         "--report-format", "json",
     ]
 
-    logger.info(f"Running Nettacker: {' '.join(cmd)}")
+    logger.info(f"Running Nettacker via '{' '.join(nettacker_bin)}': {' '.join(cmd[len(nettacker_bin):])}")
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
