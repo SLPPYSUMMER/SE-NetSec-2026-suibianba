@@ -3,7 +3,7 @@
 ENV PYTHONUNBUFFERED=1
 WORKDIR /blt
 
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y postgresql-client libpq-dev \
     libmemcached11 libmemcachedutil2 libmemcached-dev libz-dev \
@@ -14,9 +14,9 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && pip install poetry==2.2.1
-RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+RUN pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/simple/
 RUN poetry config virtualenvs.create false
-RUN poetry source add --priority=default mirrors https://mirrors.aliyun.com/pypi/simple/ 2>/dev/null || true
+RUN poetry source add --priority=default mirrors https://mirrors.tuna.tsinghua.edu.cn/pypi/simple/ 2>/dev/null || true
 COPY pyproject.toml poetry.lock* ./
 RUN pip uninstall -y httpx || true
 RUN poetry lock 2>/dev/null || true && poetry install --no-root --no-interaction || (poetry lock && poetry install --no-root --no-interaction)
@@ -30,7 +30,7 @@ WORKDIR /blt
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y postgresql-client libpq-dev \
     libmemcached11 libmemcachedutil2 \
