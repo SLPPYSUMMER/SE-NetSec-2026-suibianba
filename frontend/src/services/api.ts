@@ -44,7 +44,7 @@ export const authApi = {
     request<{ success: boolean; message: string; user_id: number; username: string; is_staff: boolean }>('/auth/login', {
       method: 'POST', body: JSON.stringify({ username, password }),
     }),
-  register: (data: { username: string; password: string; email?: string; team_action?: string; team_name?: string; team_id?: number }) =>
+  register: (data: { username: string; password: string; email?: string }) =>
     request<{ success: boolean; message: string; user_id: number; username: string; is_staff: boolean }>('/auth/register', {
       method: 'POST', body: JSON.stringify(data),
     }),
