@@ -21,7 +21,15 @@ COPY pyproject.toml poetry.lock* ./
 RUN pip uninstall -y httpx || true
 RUN poetry lock 2>/dev/null || true && poetry install --no-root --no-interaction || (poetry lock && poetry install --no-root --no-interaction)
 RUN pip install django-cors-headers 2>/dev/null || true
-RUN pip install owasp-nettacker 2>/dev/null || true
+
+# Install OWASP Nettacker - automated penetration testing tool
+RUN pip install owasp-nettacker --index-url https://mirrors.aliyun.com/pypi/simple/ || \
+    pip install git+https://github.com/OWASP/Nettacker.git || \
+    echo "Warning: owasp-nettacker installation failed, scan feature may not work"
+
+# Verify nettacker command is available
+RUN nettacker --help 2>/dev/null || python -c "from nettacker import __version__; print('nettaker OK')" 2>/dev/null || \
+    echo "Note: nettacker CLI not available, scanner will use fallback mode"
 
 FROM python:3.11.2-slim
 ENV PYTHONUNBUFFERED=1
