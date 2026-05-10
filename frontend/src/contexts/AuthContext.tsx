@@ -26,7 +26,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const ROLE_LABELS: Record<string, string> = {
   admin: '团队管理员',
-  team_lead: '团队负责人',
+  team_lead: '安全负责人',
   developer: '开发人员',
   observer: '观察者',
 };

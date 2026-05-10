@@ -4,8 +4,9 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-NETTACKER_PATH = os.environ.get("NETTACKER_PATH", "nettacker")
+NETTACKER_CMD = os.environ.get("NETTACKER_CMD", "nettacker")
 MAX_SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT", "1800"))
+QUICK_SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT_QUICK", "600"))
 
 
 def run_scan(scan_task_id: int, target: str, scanner_type: str):
@@ -24,16 +25,18 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
         detail=f"开始扫描 {target} (类型: {scanner_type})", team=task.team,
     )
 
-    profile_map = {"deep": "full_scan", "quick": "quick_scan", "custom": "vulnerability_scan"}
+    profile_map = {"deep": "full_scan", "quick": "quick_scan"}
     profile = profile_map.get(scanner_type, "full_scan")
 
+    timeout = QUICK_SCAN_TIMEOUT if scanner_type == "quick" else MAX_SCAN_TIMEOUT
+
     cmd = [
-        NETTACKER_PATH, "-m", profile, "-t", target,
+        NETTACKER_CMD, "-m", profile, "-t", target,
         "-o", "/tmp/nettacker_result.json", "--output-format", "json"
     ]
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=MAX_SCAN_TIMEOUT)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         findings = []
 
         if os.path.exists("/tmp/nettacker_result.json"):

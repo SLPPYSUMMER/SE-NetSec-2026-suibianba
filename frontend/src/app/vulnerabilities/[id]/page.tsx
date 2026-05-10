@@ -22,9 +22,21 @@ export default function VulnerabilityDetailPage() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState(0);
 
-  const canManage = user?.is_staff || user?.role === '团队管理员' || user?.role === '团队负责人';
-  const canFix = user?.is_staff || (report?.assignee?.id === user?.id) || user?.role === '开发人员';
-  const isReporter = report?.reporter?.id === user?.id;
+  const isStaff = user?.is_staff;
+  const role = user?.role;
+  const userId = user?.id;
+  const isAssignee = report?.assignee?.id === userId;
+  const isReporter = report?.reporter?.id === userId;
+  const isTeamAdmin = role === '团队管理员';
+  const isSecurityLead = role === '安全负责人';
+  const isDeveloper = role === '开发人员';
+  const isObserver = role === '观察者';
+  const hasTeam = !!(user?.team_id);
+  const canManage = isStaff || isTeamAdmin || isSecurityLead || (!hasTeam && isReporter);
+  const canAssign = isStaff || isTeamAdmin || isSecurityLead;
+  const canFix = isStaff || (isAssignee && !isObserver) || (isDeveloper && isAssignee);
+  const canReview = isStaff || isTeamAdmin || isSecurityLead || isReporter;
+  const canClose = isStaff || isTeamAdmin || isSecurityLead || (!hasTeam && isReporter);
 
   useEffect(() => {
     const fetch = async () => {
@@ -156,7 +168,7 @@ export default function VulnerabilityDetailPage() {
                   </div>
 
                   <div className="mt-6 space-y-2">
-                    {report.status === 'pending' && canManage && (
+                    {report.status === 'pending' && canAssign && (
                       <button onClick={() => setShowAssignModal(true)} disabled={!!actionLoading}
                         className="w-full py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary/80 disabled:opacity-50">
                         分派漏洞给处理人
@@ -168,19 +180,19 @@ export default function VulnerabilityDetailPage() {
                         {actionLoading === 'fix' ? '处理中...' : '提交修复'}
                       </button>
                     )}
-                    {report.status === 'fixed' && (canManage || isReporter) && (
+                    {report.status === 'fixed' && canReview && (
                       <button onClick={() => handleAction('review')} disabled={!!actionLoading}
                         className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 disabled:opacity-50">
                         {actionLoading === 'review' ? '处理中...' : '确认复核'}
                       </button>
                     )}
-                    {report.status === 'reviewing' && canManage && (
+                    {report.status === 'reviewing' && canClose && (
                       <button onClick={() => handleAction('close')} disabled={!!actionLoading}
                         className="w-full py-3 bg-gray-600 text-white font-medium rounded-lg hover:bg-gray-500 disabled:opacity-50">
                         {actionLoading === 'close' ? '处理中...' : '关闭漏洞'}
                       </button>
                     )}
-                    {!canManage && report.status === 'pending' && <p className="text-xs text-gray-500 text-center">等待团队管理员分派</p>}
+                    {!canManage && report.status === 'pending' && <p className="text-xs text-gray-500 text-center">等待分派</p>}
                   </div>
 
                   <div className="mt-6 pt-6 border-t border-dark-border space-y-4">

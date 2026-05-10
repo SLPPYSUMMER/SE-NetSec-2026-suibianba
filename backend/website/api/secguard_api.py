@@ -241,28 +241,58 @@ def create_audit_log(user, action: str, target_type: str, target_id: str,
     )
 
 
+def get_user_team_role(request: HttpRequest):
+    """
+    获取当前用户的团队角色。
+    返回 (role, has_team)，role 为 TeamMembership.Role 值或 None。
+    系统管理员返回 ('admin', True)。
+    """
+    if not request.user.is_authenticated:
+        return None, False
+    if request.user.is_staff:
+        return 'admin', True
+    try:
+        profile = request.user.userprofile
+        if profile.team:
+            membership = TeamMembership.objects.filter(
+                user=request.user, team=profile.team,
+                status=TeamMembership.Status.ACCEPTED,
+            ).first()
+            if membership:
+                return membership.role, True
+    except Exception:
+        pass
+    membership = TeamMembership.objects.filter(
+        user=request.user,
+        status=TeamMembership.Status.ACCEPTED,
+    ).first()
+    if membership:
+        return membership.role, True
+    return None, False
+
+
 def check_permission(user, required_role: str = None) -> bool:
     """
-    基于角色的权限检查（RBAC基础实现）
-    可扩展为完整的权限系统
+    基础权限检查。is_staff 用户拥有所有权限。
     """
     if not user.is_authenticated:
         return False
+    if user.is_superuser or user.is_staff:
+        return True
+    if required_role is None:
+        return True
+    return False
 
-    role_permissions = {
-        'admin': user.is_superuser or user.is_staff,
-        'manager': user.is_staff or user.is_superuser,
-        'tester': True,  # 所有认证用户都可测试
-        'developer': True,  # 所有认证用户都可开发
-    }
 
-    if required_role and required_role not in role_permissions:
-        return False
-
-    if required_role:
-        return role_permissions.get(required_role, False)
-
-    return True
+def _can_assign(user, team_role, has_team, assignee_id):
+    """检查用户是否可以分派漏洞给指定处理人"""
+    if user.is_staff:
+        return True
+    if has_team and team_role in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
+        return True
+    if not has_team:
+        return assignee_id == user.id
+    return False
 
 
 def get_user_team(request: HttpRequest):
@@ -312,11 +342,18 @@ def require_team_role(request: HttpRequest, allowed_roles: list):
 
 
 def filter_by_team(queryset, request: HttpRequest):
-    """对 queryset 按用户团队过滤；管理员不过滤"""
+    """对 queryset 按用户团队过滤；管理员不过滤；无团队用户只看自己的数据"""
     if request.user.is_staff:
         return queryset
     team, _ = get_user_team(request)
     if team is None:
+        model = queryset.model
+        if hasattr(model, 'reporter'):
+            return queryset.filter(reporter=request.user)
+        elif hasattr(model, 'created_by'):
+            return queryset.filter(created_by=request.user)
+        elif hasattr(model, 'user'):
+            return queryset.filter(user=request.user)
         return queryset.none()
     return queryset.filter(team=team)
 
@@ -583,10 +620,18 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
 
     assignee = None
     if payload.assignee_id:
+        team_role, has_team = get_user_team_role(request)
+
+        if not request.user.is_staff:
+            if has_team and team_role not in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
+                raise HttpError(400, "您没有权限指派处理人，请留空由管理员分派")
+            elif not has_team and payload.assignee_id != request.user.id:
+                raise HttpError(400, "您尚未加入团队，只能将漏洞指派给自己")
+
         try:
             assignee = User.objects.get(id=payload.assignee_id)
         except User.DoesNotExist:
-            raise HttpError(400, "指定的处理人不存在")
+            raise HttpError(400, f"被分派的用户ID {payload.assignee_id} 不存在")
 
     duplicate_result = check_report_duplicates(
         title=payload.title,
@@ -782,10 +827,15 @@ def assign_report(request: HttpRequest, vuln_id: str, payload: AssignReportSchem
 
     状态转换：待分派(PENDING) / 处理中(PROCESSING) → 处理中(PROCESSING)
 
-    权限要求：项目经理 / 管理员
+    权限要求：
+      - 系统管理员 / 团队管理员 / 安全负责人：可分派给任何人
+      - 无团队用户：只能分派给自己
+      - 开发人员/观察者：不可分派
     """
-    if not check_permission(request.user, 'manager'):
-        raise HttpError(400, "需要项目经理或管理员权限才能分派漏洞")
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    team_role, has_team = get_user_team_role(request)
 
     try:
         report = Report.objects.select_related('assignee').get(vuln_id=vuln_id)
@@ -793,10 +843,13 @@ def assign_report(request: HttpRequest, vuln_id: str, payload: AssignReportSchem
         raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
 
     if report.status not in [Report.Status.PENDING, Report.Status.PROCESSING]:
-        raise HttpError(400, 
+        raise HttpError(400,
             f"当前状态 '{report.get_status_display()}' 不允许分派操作，"
             f"仅允许在 '待分派' 或 '处理中' 状态下分派"
         )
+
+    if not _can_assign(request.user, team_role, has_team, payload.assignee_id):
+        raise HttpError(400, "您没有权限执行分派操作")
 
     try:
         assignee = User.objects.get(id=payload.assignee_id)
@@ -897,23 +950,33 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
             f"允许的起始状态: {', '.join(allowed_from)}"
         )
 
-    role_check = action_config['allowed_roles']
+    team_role, has_team = get_user_team_role(request)
     is_allowed = False
 
-    if 'admin' in role_check and request.user.is_staff:
+    if request.user.is_staff:
         is_allowed = True
-    elif 'manager' in role_check and request.user.is_staff:
-        is_allowed = True
-    elif 'assignee' in role_check and report.assignee == request.user:
-        is_allowed = True
-    elif 'reporter' in role_check and report.reporter == request.user:
-        is_allowed = True
+    elif payload.action == 'submit_fix':
+        if has_team and team_role == TeamMembership.Role.OBSERVER:
+            is_allowed = False
+        else:
+            is_allowed = report.assignee == request.user
+    elif payload.action == 'confirm_review':
+        if has_team and team_role in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
+            is_allowed = True
+        elif has_team and team_role == TeamMembership.Role.DEVELOPER:
+            is_allowed = report.reporter == request.user
+        elif not has_team:
+            is_allowed = report.reporter == request.user
+        else:
+            is_allowed = False
+    elif payload.action in ('close', 'reopen'):
+        if has_team and team_role not in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
+            is_allowed = False
+        else:
+            is_allowed = True
 
     if not is_allowed:
-        raise HttpError(400, 
-            f"您没有权限执行 '{action_config['action_name']}' 操作\n"
-            f"需要角色: {', '.join(role_check)}"
-        )
+        raise HttpError(400, f"您没有权限执行 '{action_config['action_name']}' 操作")
 
     old_status = report.get_status_display()
     report.status = action_config['to_status']
@@ -1087,7 +1150,7 @@ class ScanTaskOut(BaseModel):
 
 class ScanTaskCreateSchema(BaseModel):
     target: str = Field(..., description="扫描目标URL")
-    scanner_type: str = Field("deep", description="扫描类型: deep/quick/custom")
+    scanner_type: str = Field("deep", description="扫描类型: deep/quick")
     name: Optional[str] = Field(None, description="任务名称（可选，默认自动生成）")
 
 

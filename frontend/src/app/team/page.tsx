@@ -8,12 +8,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Users, UserPlus, Check, X, Mail, Shield, Loader2, AlertCircle, Trash2, Search, Building, ArrowLeftRight } from 'lucide-react';
 
 const ROLE_OPTIONS = [
-  { value: 'team_lead', label: '团队负责人' },
+  { value: 'team_lead', label: '安全负责人' },
   { value: 'developer', label: '开发人员' },
   { value: 'observer', label: '观察者' },
 ];
 const ROLE_LABELS: Record<string, string> = {
-  admin: '团队管理员', team_lead: '团队负责人', developer: '开发人员', observer: '观察者',
+  admin: '团队管理员', team_lead: '安全负责人', developer: '开发人员', observer: '观察者',
 };
 
 export default function TeamPage() {

@@ -4055,7 +4055,7 @@ class TeamMembership(models.Model):
 
     class Role(models.TextChoices):
         ADMIN = "admin", "团队管理员"
-        TEAM_LEAD = "team_lead", "团队负责人"
+        TEAM_LEAD = "team_lead", "安全负责人"
         DEVELOPER = "developer", "开发人员"
         OBSERVER = "observer", "观察者"
 

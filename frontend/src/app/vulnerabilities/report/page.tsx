@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { reportApi, teamsApi } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { Save, Send, Loader2, AlertCircle, User } from 'lucide-react';
 
 export default function ReportVulnerabilityPage() {
@@ -23,6 +24,14 @@ export default function ReportVulnerabilityPage() {
     project_id: 1,
     assignee_id: 0,
   });
+
+  const { user } = useAuth();
+  const isStaff = user?.is_staff;
+  const canAssignAnyone = isStaff || user?.role === '团队管理员' || user?.role === '安全负责人';
+
+  const assignableMembers = canAssignAnyone
+    ? members
+    : members.filter((m: any) => m.user_id === user?.id);
 
   useEffect(() => {
     teamsApi.members().then(m => setMembers(m.items || [])).catch(() => {});
@@ -88,11 +97,11 @@ export default function ReportVulnerabilityPage() {
                 <select value={formData.assignee_id || ''} onChange={(e) => update('assignee_id', parseInt(e.target.value) || 0)}
                   className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
                   <option value="">不指派（待分派）</option>
-                  {members.map(m => (
+                  {assignableMembers.map(m => (
                     <option key={m.user_id} value={m.user_id}>{m.username} ({m.role_label})</option>
                   ))}
                 </select>
-                {members.length === 0 && <p className="text-xs text-gray-500 mt-1">暂无团队成员，不指派将进入待分派状态</p>}
+                {assignableMembers.length === 0 && <p className="text-xs text-gray-500 mt-1">暂无团队成员，不指派将进入待分派状态</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">CVE 编号</label>
