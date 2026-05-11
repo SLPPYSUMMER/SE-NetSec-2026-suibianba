@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { scansApi, teamsApi } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { Search, Plus, Play, Globe, Filter, Upload, ChevronLeft, ChevronRight, Activity, Loader2, Settings2, ChevronDown, ChevronUp, Trash2, XCircle, RotateCw, CheckSquare, User, Building, Layers, Check } from 'lucide-react';
 
 const MODULE_GROUPS: Record<string, string[]> = {
@@ -18,6 +19,7 @@ const MODULE_GROUPS: Record<string, string[]> = {
 };
 
 export default function ScansPage() {
+  const { user } = useAuth();
   const [targetUrl, setTargetUrl] = useState('');
   const [scanType, setScanType] = useState('deep');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -41,6 +43,9 @@ export default function ScansPage() {
   const [userTeams, setUserTeams] = useState<any[]>([]);  // 用户的所有团队
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());  // 选中的团队ID（多选）
   const [showTeamDropdown, setShowTeamDropdown] = useState(false);  // 是否显示团队下拉菜单
+  // 创建任务时的身份选择
+  const [createDataSource, setCreateDataSource] = useState<'personal' | 'team'>('team');  // 创建时的身份：个人/团队
+  const [createTeamId, setCreateTeamId] = useState<number | null>(null);  // 创建时选择的团队ID
   const perPage = 20;
 
   const fetchScans = async (showLoading: boolean = true) => {
@@ -74,6 +79,16 @@ export default function ScansPage() {
         const teams = data.items || [];
         setUserTeams(teams);
 
+        // 设置默认创建身份：如果有当前团队，默认选择团队身份
+        if (user?.team_id && teams.length > 0) {
+          setCreateDataSource('team');
+          setCreateTeamId(user.team_id);
+        } else if (teams.length === 0) {
+          // 没有团队，只能选择个人
+          setCreateDataSource('personal');
+          setCreateTeamId(null);
+        }
+
         console.log('📊 [DEBUG] userTeams 状态已更新，团队详情:');
         teams.forEach((team, index) => {
           console.log(`  ${index + 1}. ${team.team_name} (ID: ${team.team_id}, 状态: ${team.status})`);
@@ -85,6 +100,21 @@ export default function ScansPage() {
     };
     loadTeams();
   }, []);
+
+  // 监听团队切换，自动重置数据源过滤状态
+  const prevTeamIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevTeamIdRef.current !== null && prevTeamIdRef.current !== user?.team_id) {
+      console.log('🔄 [DEBUG] 检测到团队切换:', prevTeamIdRef.current, '→', user?.team_id);
+      setDataSource('all');
+      setSelectedTeamIds(new Set());
+      setShowTeamDropdown(false);
+      setPage(1);
+      setSelectedIds(new Set());
+      fetchScans(true);
+    }
+    prevTeamIdRef.current = user?.team_id ?? null;
+  }, [user?.team_id]);
 
   // 轮询活跃任务进度（使用 ref 避免复杂依赖）
   const activeRef = useRef(false);
@@ -164,13 +194,22 @@ export default function ScansPage() {
 
   const handleCreate = async () => {
     if (!targetUrl) return;
+    if (createDataSource === 'team' && !createTeamId) {
+      alert('请选择一个团队');
+      return;
+    }
     setCreating(true);
     try {
       const payload: any = { 
         target: targetUrl, 
         scanner_type: scanType,
-        timeout_minutes: timeoutMinutes  // 使用用户设置的超时时间
+        timeout_minutes: timeoutMinutes,  // 使用用户设置的超时时间
+        data_source: createDataSource,   // 添加数据来源
       };
+      // 如果选择团队身份，添加团队ID
+      if (createDataSource === 'team' && createTeamId) {
+        payload.team_id = createTeamId;
+      }
       if (scanType === 'custom') {
         payload.selected_modules = Array.from(selectedModules).join(',');
         payload.thread_count = threadCount;
@@ -348,17 +387,65 @@ export default function ScansPage() {
                     className="w-full pl-12 pr-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-primary transition-colors" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">扫描配置模板</label>
+              
+              {/* 身份选择：个人/团队 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">创建身份</label>
+                <div className="flex space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => { setCreateDataSource('personal'); setCreateTeamId(null); }}
+                    className={`flex-1 px-4 py-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center space-x-2 ${
+                      createDataSource === 'personal'
+                        ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
+                        : 'bg-dark-bg border-dark-border text-gray-400 hover:text-white hover:border-gray-500'
+                    } border`}>
+                    <User className="w-4 h-4" />
+                    <span>个人</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreateDataSource('team')}
+                    className={`flex-1 px-4 py-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center space-x-2 ${
+                      createDataSource === 'team'
+                        ? 'bg-green-500/20 border-green-500/50 text-green-400'
+                        : 'bg-dark-bg border-dark-border text-gray-400 hover:text-white hover:border-gray-500'
+                    } border`}>
+                    <Building className="w-4 h-4" />
+                    <span>团队</span>
+                  </button>
+                </div>
+                
+                {/* 团队选择下拉框 */}
+                {createDataSource === 'team' && (
+                  <div className="mt-2">
+                    <select 
+                      value={createTeamId || ''} 
+                      onChange={(e) => setCreateTeamId(parseInt(e.target.value) || null)}
+                      className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer"
+                    >
+                      <option value="">-- 选择团队 --</option>
+                      {userTeams.filter((t: any) => t.status === 'accepted').map((team: any) => (
+                        <option key={team.team_id} value={team.team_id}>
+                          {team.team_name} ({team.role_label})
+                        </option>
+                      ))}
+                    </select>
+                    {!createTeamId && (
+                      <p className="mt-1 text-xs text-yellow-500">请选择一个团队</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">扫描配置模板</label>
                   <select value={scanType} onChange={(e) => { setScanType(e.target.value); if (e.target.value === 'custom') setShowAdvanced(true); }}
                     className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
                     <option value="deep">深度扫描 (Deep)</option>
                     <option value="quick">快速扫描 (Quick)</option>
                     <option value="custom">自定义扫描 (Custom)</option>
                   </select>
-                </div>
-              </div>
             </div>
 
             {/* 高级配置 */}

@@ -1203,6 +1203,8 @@ class ScanTaskCreateSchema(BaseModel):
     hardware_usage: Optional[str] = Field(None, description="硬件使用级别: low/normal/high/maximum")
     selected_modules: Optional[str] = Field(None, description="自定义模块列表，逗号分隔")
     timeout_minutes: Optional[int] = Field(None, description="超时分钟数")
+    data_source: Optional[str] = Field(None, description="数据来源: personal/team")
+    team_id: Optional[int] = Field(None, description="团队ID（当data_source=team时必填）")
 
 
 @router.get("/scans")
@@ -1263,12 +1265,40 @@ def list_scans(
 def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
+    
+    # 根据 data_source 确定团队
+    team = None
+    if payload.data_source == 'team':
+        if payload.team_id:
+            try:
+                team = Organization.objects.get(id=payload.team_id)
+                # 验证用户是否是该团队成员
+                membership = TeamMembership.objects.filter(
+                    user=request.user,
+                    team=team,
+                    status='accepted'
+                ).first()
+                if not membership and not request.user.is_staff:
+                    raise HttpError(403, f"您不是团队 '{team.name}' 的成员")
+            except Organization.DoesNotExist:
+                raise HttpError(400, f"团队 ID {payload.team_id} 不存在")
+        else:
+            # 如果没有指定 team_id，使用当前用户的默认团队
+            team = set_request_team(request)
+    else:
+        # personal 或未指定，根据原有逻辑处理
+        if payload.data_source == 'personal':
+            team = None
+        else:
+            # 未指定 data_source，使用原有逻辑（管理员无团队，普通用户用当前团队）
+            team = set_request_team(request)
+    
     task = ScanTask.objects.create(
         name=payload.name or f"Scan_{payload.target}_{datetime.now().strftime('%Y%m%d%H%M')}",
         target=payload.target,
         scanner_type=payload.scanner_type,
         status=ScanTask.Status.PENDING,
-        team=set_request_team(request),
+        team=team,
         created_by=request.user,
         thread_count=payload.thread_count if payload.thread_count is not None else 10,
         parallel_modules=payload.parallel_modules if payload.parallel_modules is not None else 5,

@@ -100,7 +100,16 @@ export default function TeamPage() {
   const handleSwitchTeam = async (teamId: number) => {
     if (teamId === user?.team_id) return;
     setSwitching(true);
-    try { const r = await teamsApi.switchTeam(teamId); await refreshUser(); showMsg(r.message || '已切换团队'); } catch (err: any) { showMsg(err.message); } finally { setSwitching(false); }
+    try {
+      const r = await teamsApi.switchTeam(teamId);
+      await refreshUser();
+      setTab('members');
+      showMsg(r.message || '已切换团队');
+    } catch (err: any) {
+      showMsg(err.message);
+    } finally {
+      setSwitching(false);
+    }
   };
 
   const handleLeave = async () => {

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { assetsApi, teamsApi } from '@/services/api';
-import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, Smartphone, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Check } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Check } from 'lucide-react';
 
 const assetTypes = ['全部', 'host', 'port', 'service', 'subdomain', 'web_tech', 'ssl_cert'];
 const typeLabels: Record<string, string> = {
@@ -24,6 +25,7 @@ const typeColors: Record<string, { color: string; bg: string; icon: any }> = {
 const statuses = ['全部', 'online', 'offline', 'unknown'];
 
 export default function AssetsPage() {
+  const { user } = useAuth();
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('全部');
@@ -59,6 +61,23 @@ export default function AssetsPage() {
     };
     loadTeams();
   }, []);
+
+  // 监听团队切换，自动重置数据源过滤状态
+  const prevTeamIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevTeamIdRef.current !== null && prevTeamIdRef.current !== user?.team_id) {
+      console.log('🔄 [DEBUG] 资产页面检测到团队切换:', prevTeamIdRef.current, '→', user?.team_id);
+      setDataSource('all');
+      setSelectedTeamIds(new Set());
+      setShowTeamDropdown(false);
+      setSelectedType('全部');
+      setSelectedStatus('全部');
+      setSearchQuery('');
+      setExpandedRows(new Set());
+      fetchAssets();
+    }
+    prevTeamIdRef.current = user?.team_id ?? null;
+  }, [user?.team_id]);
 
   const toggleExpand = (id: number) => {
     setExpandedRows(prev => {

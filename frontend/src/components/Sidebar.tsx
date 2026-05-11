@@ -104,7 +104,7 @@ export default function Sidebar() {
             <div className="flex items-center space-x-3 px-3 py-2 bg-dark-card rounded-lg">
               <Activity className="w-4 h-4 text-green-500" />
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-white truncate">系统版本 v4.2.0</p>
+                <p className="text-xs text-white truncate">系统版本 v4.3.0</p>
                 <p className="text-xs text-gray-500">运行正常</p>
               </div>
             </div>
