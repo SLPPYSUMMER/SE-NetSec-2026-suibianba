@@ -141,10 +141,10 @@ export const scansApi = {
     request<any>(`/scans/${id}/cancel`, { method: 'POST' }),
   retry: (id: number) =>
     request<any>(`/scans/${id}/retry`, { method: 'POST' }),
-  batchDelete: (ids: number[]) =>
+  batchDelete: (ids: (number | string)[]) =>
     request<{ success: boolean; deleted: number; skipped: number; message: string }>('/scans/batch', {
       method: 'DELETE',
-      body: JSON.stringify({ scan_ids: ids })
+      body: JSON.stringify({ scan_ids: ids.map(id => typeof id === 'string' ? parseInt(id, 10) : id).filter(id => !isNaN(id)) })
     }),
 };
 

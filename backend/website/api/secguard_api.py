@@ -1294,6 +1294,63 @@ def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
     }
 
 
+class BatchDeleteSchema(BaseModel):
+    scan_ids: List[int] = Field(..., description="要删除的任务 ID 列表")
+
+    @validator('scan_ids', pre=True, always=True)
+    def validate_scan_ids(cls, v):
+        if not isinstance(v, list):
+            raise ValueError('scan_ids 必须是列表')
+        validated_ids = []
+        for item in v:
+            if isinstance(item, int):
+                validated_ids.append(item)
+            elif isinstance(item, str):
+                try:
+                    validated_ids.append(int(item))
+                except (ValueError, TypeError):
+                    continue
+            else:
+                try:
+                    validated_ids.append(int(item))
+                except (ValueError, TypeError):
+                    continue
+        return validated_ids
+
+
+@router.delete("/scans/batch")
+def batch_delete_scans(request: HttpRequest, payload: BatchDeleteSchema):
+    """批量删除扫描任务（排除运行中的）"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    if not payload.scan_ids:
+        raise HttpError(400, "请提供要删除的任务 ID 列表")
+    
+    queryset = ScanTask.objects.filter(id__in=payload.scan_ids)
+    
+    # 权限过滤：管理员可删所有，普通用户只能删自己的
+    if not request.user.is_staff:
+        queryset = queryset.filter(created_by=request.user)
+    
+    # 排除运行中的任务
+    running_count = queryset.filter(status=ScanTask.Status.RUNNING).count()
+    deletable = queryset.exclude(status=ScanTask.Status.RUNNING)
+    
+    count, _ = deletable.delete()
+    
+    message = f"成功删除 {count} 个任务"
+    if running_count > 0:
+        message += f"，跳过 {running_count} 个运行中的任务"
+    
+    return {
+        "success": True,
+        "deleted": count,
+        "skipped": running_count,
+        "message": message
+    }
+
+
 @router.delete("/scans/{scan_id}")
 def delete_scan(request: HttpRequest, scan_id: int):
     """删除单个扫描任务（仅限非运行中任务）"""
@@ -1350,43 +1407,6 @@ def cancel_scan_api(request: HttpRequest, scan_id: int):
         }
     else:
         raise HttpError(500, result.get('message', '取消失败'))
-
-
-class BatchDeleteSchema(BaseModel):
-    scan_ids: List[int] = Field(..., description="要删除的任务 ID 列表")
-
-
-@router.delete("/scans/batch")
-def batch_delete_scans(request: HttpRequest, payload: BatchDeleteSchema):
-    """批量删除扫描任务（排除运行中的）"""
-    if not request.user.is_authenticated:
-        raise HttpError(400, "请先登录")
-    
-    if not payload.scan_ids:
-        raise HttpError(400, "请提供要删除的任务 ID 列表")
-    
-    queryset = ScanTask.objects.filter(id__in=payload.scan_ids)
-    
-    # 权限过滤：管理员可删所有，普通用户只能删自己的
-    if not request.user.is_staff:
-        queryset = queryset.filter(created_by=request.user)
-    
-    # 排除运行中的任务
-    running_count = queryset.filter(status=ScanTask.Status.RUNNING).count()
-    deletable = queryset.exclude(status=ScanTask.Status.RUNNING)
-    
-    count, _ = deletable.delete()
-    
-    message = f"成功删除 {count} 个任务"
-    if running_count > 0:
-        message += f"，跳过 {running_count} 个运行中的任务"
-    
-    return {
-        "success": True,
-        "deleted": count,
-        "skipped": running_count,
-        "message": message
-    }
 
 
 @router.post("/scans/{scan_id}/retry")
