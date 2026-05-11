@@ -150,6 +150,28 @@ export const scansApi = {
 
 export const assetsApi = {
   list: () => request<{ items: any[]; total_count: number }>('/assets'),
+  delete: (id: number) =>
+    request<{ success: boolean; message: string }>(`/assets/${id}`, { method: 'DELETE' }),
+  batchDelete: (ids: (number | string)[]) =>
+    request<{ success: boolean; deleted: number; skipped: number; message: string }>('/assets/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ asset_ids: ids.map(id => typeof id === 'string' ? parseInt(id, 10) : id).filter(id => !isNaN(id)) })
+    }),
+};
+
+export const reportsApi = {
+  list: (params?: Record<string, string | number>) => {
+    const qs = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request<{ items: any[]; total_count: number; page: number; per_page: number }>(`/reports${qs}`);
+  },
+  getDetail: (vulnId: string) => request<any>(`/reports/${vulnId}`),
+  delete: (vulnId: string) =>
+    request<{ success: boolean; message: string }>(`/reports/${vulnId}`, { method: 'DELETE' }),
+  batchDelete: (ids: (number | string)[]) =>
+    request<{ success: boolean; deleted: number; skipped: number; message: string }>('/reports/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ report_ids: ids.map(id => typeof id === 'string' ? parseInt(id, 10) : id).filter(id => !isNaN(id)) })
+    }),
 };
 
 export const teamsApi = {

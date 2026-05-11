@@ -4026,9 +4026,11 @@ class Asset(models.Model):
 
     scan_task = models.ForeignKey(
         ScanTask,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="assets",
-        help_text="所属扫描任务",
+        null=True,
+        blank=True,
+        help_text="所属扫描任务（删除任务后保留资产）",
     )
     asset_type = models.CharField(
         max_length=20,

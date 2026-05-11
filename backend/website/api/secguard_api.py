@@ -759,14 +759,13 @@ def list_reports(
     result_items = []
     for r in reports:
         item = ReportListSchema.from_orm(r)
-        data_source = "personal"
-        source_name = "个人"
-        if team and r.team_id == team.id:
+        # 根据报告的 team 字段判断数据来源（与扫描任务逻辑一致）
+        if r.team_id:
             data_source = "team"
-            source_name = team.name
-        elif r.reporter_id != request.user.id:
-            data_source = "team"
-            source_name = team.name if team else "未知团队"
+            source_name = r.team.name if r.team else f"团队{r.team_id}"
+        else:
+            data_source = "personal"
+            source_name = "个人"
 
         item.data_source = data_source
         item.source_name = source_name
@@ -1226,14 +1225,15 @@ def list_scans(
 
     result = []
     for t in items:
-        data_source = "personal"
-        source_name = "个人"
-        if team and t.team_id == team.id:
+        # 根据任务的 team 字段判断数据来源（而不是与当前用户的团队比较）
+        if t.team_id:
+            # 有团队ID → 团队任务
             data_source = "team"
-            source_name = team.name
-        elif t.created_by_id != request.user.id:
-            data_source = "team"
-            source_name = team.name if team else "未知团队"
+            source_name = t.team.name if t.team else f"团队{t.team_id}"
+        else:
+            # 无团队ID → 个人任务
+            data_source = "personal"
+            source_name = "个人"
 
         result.append(ScanTaskOut(
             id=t.id,
@@ -1811,6 +1811,209 @@ def list_teams(request: HttpRequest, search: Optional[str] = Query(None)):
             "admin_name": t.admin.username if t.admin else None,
         })
     return {"items": result}
+
+
+# ==================== 漏洞和资产删除功能 ====================
+
+class ReportDeleteSchema(BaseModel):
+    """漏洞删除请求"""
+    report_ids: List[int] = Field(..., description="要删除的漏洞ID列表")
+
+    @validator('report_ids', pre=True, always=True)
+    def validate_report_ids(cls, v):
+        if not isinstance(v, list):
+            raise ValueError('report_ids 必须是列表')
+        validated_ids = []
+        for item in v:
+            if isinstance(item, int):
+                validated_ids.append(item)
+            elif isinstance(item, str):
+                try:
+                    validated_ids.append(int(item))
+                except (ValueError, TypeError):
+                    continue
+        return validated_ids
+
+
+class AssetDeleteSchema(BaseModel):
+    """资产删除请求"""
+    asset_ids: List[int] = Field(..., description="要删除的资产ID列表")
+
+    @validator('asset_ids', pre=True, always=True)
+    def validate_asset_ids(cls, v):
+        if not isinstance(v, list):
+            raise ValueError('asset_ids 必须是列表')
+        validated_ids = []
+        for item in v:
+            if isinstance(item, int):
+                validated_ids.append(item)
+            elif isinstance(item, str):
+                try:
+                    validated_ids.append(int(item))
+                except (ValueError, TypeError):
+                    continue
+        return validated_ids
+
+
+def check_delete_permission(request: HttpRequest, obj) -> bool:
+    """
+    检查用户是否有权限删除对象
+    
+    权限规则：
+    - 管理员：可以删除所有对象
+    - 个人数据（无团队）：只有创建者可以删除
+    - 团队数据：创建者或团队管理员可以删除
+    """
+    # 管理员拥有所有权限
+    if request.user.is_staff:
+        return True
+    
+    # 检查是否为创建者
+    if hasattr(obj, 'reporter') and obj.reporter == request.user:
+        return True
+    if hasattr(obj, 'created_by') and obj.created_by == request.user:
+        return True
+    
+    # 检查是否为团队管理员
+    if hasattr(obj, 'team') and obj.team:
+        membership = TeamMembership.objects.filter(
+            user=request.user,
+            team=obj.team,
+            status='accepted',
+            role__in=['admin', 'team_lead']
+        ).first()
+        if membership:
+            return True
+    
+    return False
+
+
+@router.delete("/reports/{vuln_id}")
+def delete_report(request: HttpRequest, vuln_id: str):
+    """删除单个漏洞报告"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    report = get_object_or_404(Report, vuln_id=vuln_id)
+    
+    # 权限检查
+    if not check_delete_permission(request, report):
+        raise HttpError(403, "无权删除此漏洞（仅创建者或团队管理员可删除）")
+    
+    report_title = report.title
+    report.delete()
+    
+    AuditLog.objects.create(
+        user=request.user, action='REPORT_DELETED', target_type='Report',
+        target_id=vuln_id, detail=f"删除漏洞: {report_title}", 
+        team=report.team if hasattr(report, 'team') else None,
+    )
+    
+    return {"success": True, "message": f"漏洞 '{report_title}' 已删除"}
+
+
+@router.post("/reports/batch-delete")
+def batch_delete_reports(request: HttpRequest, payload: ReportDeleteSchema):
+    """批量删除漏洞报告"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    if not payload.report_ids:
+        raise HttpError(400, "请提供要删除的漏洞 ID 列表")
+    
+    queryset = Report.objects.filter(vuln_id__in=[str(id) for id in payload.report_ids])
+    
+    # 权限过滤：逐个检查权限
+    deletable_ids = []
+    forbidden_count = 0
+    for report in queryset:
+        if check_delete_permission(request, report):
+            deletable_ids.append(report.vuln_id)
+        else:
+            forbidden_count += 1
+    
+    count, _ = Report.objects.filter(vuln_id__in=deletable_ids).delete()
+    
+    message = f"成功删除 {count} 个漏洞"
+    if forbidden_count > 0:
+        message += f"，{forbidden_count} 个因权限不足被跳过"
+    
+    AuditLog.objects.create(
+        user=request.user, action='BATCH_REPORTS_DELETED', target_type='Report',
+        target_id=', '.join(map(str, payload.report_ids)), 
+        detail=f"批量删除漏洞: {count}个成功",
+    )
+    
+    return {
+        "success": True,
+        "deleted": count,
+        "skipped": forbidden_count,
+        "message": message
+    }
+
+
+@router.delete("/assets/{asset_id}")
+def delete_asset(request: HttpRequest, asset_id: int):
+    """删除单个资产"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    asset = get_object_or_404(Asset, id=asset_id)
+    
+    # 权限检查
+    if not check_delete_permission(request, asset):
+        raise HttpError(403, "无权删除此资产（仅创建者或团队管理员可删除）")
+    
+    asset_name = f"{asset.asset_type}: {asset.name}"
+    asset.delete()
+    
+    AuditLog.objects.create(
+        user=request.user, action='ASSET_DELETED', target_type='Asset',
+        target_id=str(asset_id), detail=f"删除资产: {asset_name}",
+        team=asset.team if hasattr(asset, 'team') else None,
+    )
+    
+    return {"success": True, "message": f"资产 '{asset_name}' 已删除"}
+
+
+@router.post("/assets/batch-delete")
+def batch_delete_assets(request: HttpRequest, payload: AssetDeleteSchema):
+    """批量删除资产"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    if not payload.asset_ids:
+        raise HttpError(400, "请提供要删除的资产 ID 列表")
+    
+    queryset = Asset.objects.filter(id__in=payload.asset_ids)
+    
+    # 权限过滤：逐个检查权限
+    deletable_ids = []
+    forbidden_count = 0
+    for asset in queryset:
+        if check_delete_permission(request, asset):
+            deletable_ids.append(asset.id)
+        else:
+            forbidden_count += 1
+    
+    count, _ = Asset.objects.filter(id__in=deletable_ids).delete()
+    
+    message = f"成功删除 {count} 个资产"
+    if forbidden_count > 0:
+        message += f"，{forbidden_count} 个因权限不足被跳过"
+    
+    AuditLog.objects.create(
+        user=request.user, action='BATCH_ASSETS_DELETED', target_type='Asset',
+        target_id=', '.join(map(str, payload.asset_ids)),
+        detail=f"批量删除资产: {count}个成功",
+    )
+    
+    return {
+        "success": True,
+        "deleted": count,
+        "skipped": forbidden_count,
+        "message": message
+    }
 
 
 @router.get("/teams/members")

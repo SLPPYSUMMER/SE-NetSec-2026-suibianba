@@ -5,7 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { assetsApi, teamsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Check } from 'lucide-react';
+import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Check, Trash2 } from 'lucide-react';
 
 const assetTypes = ['全部', 'host', 'port', 'service', 'subdomain', 'web_tech', 'ssl_cert'];
 const typeLabels: Record<string, string> = {
@@ -36,6 +36,8 @@ export default function AssetsPage() {
   const [userTeams, setUserTeams] = useState<any[]>([]);
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());  // 选中的资产ID
+  const [batchDeleting, setBatchDeleting] = useState(false);  // 批量删除状态
 
   const fetchAssets = async () => {
     setLoading(true);
@@ -125,6 +127,47 @@ export default function AssetsPage() {
     }
   };
 
+  // 删除单个资产
+  const handleDelete = async (assetId: number) => {
+    if (!confirm('确定要删除此资产吗？')) return;
+    try {
+      await assetsApi.delete(assetId);
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
+      fetchAssets();
+    } catch (err: any) {
+      alert(err.message || '删除失败');
+    }
+  };
+
+  // 批量删除资产
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) {
+      alert('请先选择要删除的资产');
+      return;
+    }
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个资产吗？`)) return;
+    setBatchDeleting(true);
+    try {
+      const result = await assetsApi.batchDelete(Array.from(selectedIds));
+      alert(result.message);
+      setSelectedIds(new Set());
+      fetchAssets();
+    } catch (err: any) {
+      alert(err.message || '批量删除失败');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  // 切换全选
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredAssets.length && filteredAssets.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredAssets.map(a => a.id)));
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-dark-bg">
@@ -208,6 +251,13 @@ export default function AssetsPage() {
                 </select>
               </div>
               <div className="flex items-center space-x-3">
+                {selectedIds.size > 0 && (
+                  <button onClick={handleBatchDelete} disabled={batchDeleting}
+                    className="flex items-center space-x-2 px-4 py-2 bg-red-500/20 border border-red-500/50 text-red-400 rounded-lg hover:bg-red-500/30 transition-all disabled:opacity-50">
+                    <Trash2 className="w-4 h-4" />
+                    <span className="text-sm">{batchDeleting ? '删除中...' : `批量删除 (${selectedIds.size})`}</span>
+                  </button>
+                )}
                 <button onClick={fetchAssets} className="flex items-center space-x-2 px-4 py-2 bg-dark-hover text-white rounded-lg hover:bg-primary transition-colors">
                   <RefreshCw className="w-4 h-4" /><span className="text-sm">刷新</span>
                 </button>
@@ -229,6 +279,7 @@ export default function AssetsPage() {
                       <button
                         onClick={() => {
                           if (tab.hasDropdown) {
+                            setDataSource('team');
                             setShowTeamDropdown(!showTeamDropdown);
                           } else {
                             setDataSource(tab.key as any);
@@ -318,7 +369,10 @@ export default function AssetsPage() {
             <table className="w-full">
               <thead className="bg-dark-bg/50">
                 <tr>
-                  <th className="w-10 px-3 py-4"></th>
+                  <th className="w-12 px-3 py-4">
+                    <input type="checkbox" checked={selectedIds.size === filteredAssets.length && filteredAssets.length > 0}
+                      onChange={toggleSelectAll} className="rounded bg-dark-bg border-dark-border accent-primary" />
+                  </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">资产信息</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">类型</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">状态</th>
@@ -327,11 +381,12 @@ export default function AssetsPage() {
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">漏洞数</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">重要性</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">最后扫描</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-dark-border">
                 {filteredAssets.length === 0 ? (
-                  <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">暂无资产数据</td></tr>
+                  <tr><td colSpan={10} className="px-6 py-12 text-center text-gray-500">暂无资产数据</td></tr>
                 ) : filteredAssets.map((asset) => {
                   const typeInfo = typeColors[asset.type] || typeColors.web_app;
                   const TypeIcon = typeInfo.icon;
@@ -346,10 +401,19 @@ export default function AssetsPage() {
                     <>
                       <tr key={asset.id} className="hover:bg-dark-hover/50 transition-colors cursor-pointer"
                         onClick={() => subAssets.length > 0 && toggleExpand(asset.id)}>
-                        <td className="px-3 py-4">
-                          {subAssets.length > 0 && (
-                            isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />
-                          )}
+                        <td className="px-3 py-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center space-x-2">
+                            <input type="checkbox" checked={selectedIds.has(asset.id)}
+                              onChange={() => setSelectedIds(prev => {
+                                const next = new Set(prev);
+                                next.has(asset.id) ? next.delete(asset.id) : next.add(asset.id);
+                                return next;
+                              })}
+                              className="rounded bg-dark-bg border-dark-border accent-primary" />
+                            {subAssets.length > 0 && (
+                              isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center space-x-3">
@@ -418,11 +482,17 @@ export default function AssetsPage() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm text-gray-400">{asset.last_scan?.substring(0, 10) || '--'}</span>
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => handleDelete(asset.id)}
+                            className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
                       </tr>
                       {/* 展开子资产 */}
                       {isExpanded && subAssets.length > 0 && (
                         <tr key={`${asset.id}-expanded`}>
-                          <td colSpan={8} className="px-6 py-4 bg-dark-bg/60">
+                          <td colSpan={10} className="px-6 py-4 bg-dark-bg/60">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                               {subAssets.map((sa: any) => {
                                 const saInfo = typeColors[sa.asset_type] || typeColors.web_app;

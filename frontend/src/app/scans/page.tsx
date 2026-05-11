@@ -590,6 +590,7 @@ export default function ScansPage() {
                       <button
                         onClick={() => {
                           if (tab.hasDropdown) {
+                            setDataSource('team');
                             setShowTeamDropdown(!showTeamDropdown);
                           } else {
                             setDataSource(tab.key as any);

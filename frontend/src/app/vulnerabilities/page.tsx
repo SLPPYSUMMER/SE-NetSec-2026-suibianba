@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { reportApi, teamsApi, SEVERITY_MAP, STATUS_MAP } from '@/services/api';
-import { Search, Download, Plus, Eye, ChevronLeft, ChevronRight, Loader2, User, Building, Layers, Check, ChevronDown } from 'lucide-react';
+import { reportApi, teamsApi, SEVERITY_MAP, STATUS_MAP, reportsApi } from '@/services/api';
+import { Search, Download, Plus, Eye, ChevronLeft, ChevronRight, Loader2, User, Building, Layers, Check, ChevronDown, Trash2 } from 'lucide-react';
 
 export default function VulnerabilitiesPage() {
   const router = useRouter();
@@ -21,6 +21,8 @@ export default function VulnerabilitiesPage() {
   const [userTeams, setUserTeams] = useState<any[]>([]);
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());  // 选中的漏洞ID
+  const [batchDeleting, setBatchDeleting] = useState(false);  // 批量删除状态
   const perPage = 20;
 
   const fetchReports = async () => {
@@ -89,6 +91,47 @@ export default function VulnerabilitiesPage() {
     }
   };
 
+  // 删除单个漏洞
+  const handleDelete = async (vulnId: string) => {
+    if (!confirm('确定要删除此漏洞吗？')) return;
+    try {
+      await reportsApi.delete(vulnId);
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(vulnId); return next; });
+      fetchReports();
+    } catch (err: any) {
+      alert(err.message || '删除失败');
+    }
+  };
+
+  // 批量删除漏洞
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) {
+      alert('请先选择要删除的漏洞');
+      return;
+    }
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个漏洞吗？`)) return;
+    setBatchDeleting(true);
+    try {
+      const result = await reportsApi.batchDelete(Array.from(selectedIds));
+      alert(result.message);
+      setSelectedIds(new Set());
+      fetchReports();
+    } catch (err: any) {
+      alert(err.message || '批量删除失败');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  // 切换全选
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredReports.length && filteredReports.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredReports.map(r => r.vuln_id)));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-dark-bg">
       <Sidebar />
@@ -128,10 +171,19 @@ export default function VulnerabilitiesPage() {
                 <option value="closed">已关闭</option>
               </select>
             </div>
-            <button onClick={() => router.push('/vulnerabilities/report')}
-              className="px-6 py-2.5 bg-gradient-to-r from-primary to-cyan-400 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all flex items-center space-x-2">
-              <Plus className="w-4 h-4" /><span>新建漏洞</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              {selectedIds.size > 0 && (
+                <button onClick={handleBatchDelete} disabled={batchDeleting}
+                  className="px-4 py-2.5 bg-red-500/20 border border-red-500/50 text-red-400 font-medium rounded-lg hover:bg-red-500/30 transition-all flex items-center space-x-2 disabled:opacity-50">
+                  <Trash2 className="w-4 h-4" />
+                  <span>{batchDeleting ? '删除中...' : `批量删除 (${selectedIds.size})`}</span>
+                </button>
+              )}
+              <button onClick={() => router.push('/vulnerabilities/report')}
+                className="px-6 py-2.5 bg-gradient-to-r from-primary to-cyan-400 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all flex items-center space-x-2">
+                <Plus className="w-4 h-4" /><span>新建漏洞</span>
+              </button>
+            </div>
           </div>
 
           {error && <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg text-sm">{error}</div>}
@@ -150,6 +202,7 @@ export default function VulnerabilitiesPage() {
                       <button
                         onClick={() => {
                           if (tab.hasDropdown) {
+                            setDataSource('team');
                             setShowTeamDropdown(!showTeamDropdown);
                           } else {
                             setDataSource(tab.key as any);
@@ -239,6 +292,10 @@ export default function VulnerabilitiesPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-dark-border">
+                  <th className="px-6 py-4">
+                    <input type="checkbox" checked={selectedIds.size === filteredReports.length && filteredReports.length > 0}
+                      onChange={toggleSelectAll} className="rounded bg-dark-bg border-dark-border accent-primary" />
+                  </th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">漏洞编号</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">漏洞标题</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">严重程度</th>
@@ -251,11 +308,20 @@ export default function VulnerabilitiesPage() {
               </thead>
               <tbody className="divide-y divide-dark-border">
                 {loading ? (
-                  <tr><td colSpan={8} className="px-6 py-12 text-center"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></td></tr>
+                  <tr><td colSpan={9} className="px-6 py-12 text-center"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></td></tr>
                 ) : filteredReports.length === 0 ? (
-                  <tr><td colSpan={8} className="px-6 py-12 text-center text-gray-500">暂无漏洞数据</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">暂无漏洞数据</td></tr>
                 ) : filteredReports.map((r) => (
                   <tr key={r.vuln_id} className="hover:bg-dark-hover transition-colors group">
+                    <td className="px-6 py-4">
+                      <input type="checkbox" checked={selectedIds.has(r.vuln_id)}
+                        onChange={() => setSelectedIds(prev => {
+                          const next = new Set(prev);
+                          next.has(r.vuln_id) ? next.delete(r.vuln_id) : next.add(r.vuln_id);
+                          return next;
+                        })}
+                        className="rounded bg-dark-bg border-dark-border accent-primary" />
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm font-mono text-primary">{r.vuln_id}</span>
                     </td>
@@ -286,10 +352,16 @@ export default function VulnerabilitiesPage() {
                       <span className="text-sm text-gray-400">{r.created_at?.substring(0, 10)}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <button onClick={() => router.push(`/vulnerabilities/${r.vuln_id}`)}
-                        className="p-2 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
-                        <Eye className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-end space-x-1">
+                        <button onClick={() => router.push(`/vulnerabilities/${r.vuln_id}`)}
+                          className="p-2 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDelete(r.vuln_id)}
+                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
