@@ -28,6 +28,9 @@ services:
       - ./backend/.env
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend/website:/blt/website:cached
+      - ./backend/blt:/blt/blt:cached
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
       - POSTGRES_PASSWORD=postgres

@@ -135,6 +135,17 @@ export const scansApi = {
     timeout_minutes?: number;
   }) =>
     request<any>('/scans', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id: number) =>
+    request<any>(`/scans/${id}`, { method: 'DELETE' }),
+  cancel: (id: number) =>
+    request<any>(`/scans/${id}/cancel`, { method: 'POST' }),
+  retry: (id: number) =>
+    request<any>(`/scans/${id}/retry`, { method: 'POST' }),
+  batchDelete: (ids: number[]) =>
+    request<{ success: boolean; deleted: number; skipped: number; message: string }>('/scans/batch', {
+      method: 'DELETE',
+      body: JSON.stringify({ scan_ids: ids })
+    }),
 };
 
 export const assetsApi = {

@@ -3895,6 +3895,7 @@ class ScanTask(models.Model):
         RUNNING = "running", "运行中"
         FINISHED = "finished", "已完成"
         FAILED = "failed", "失败"
+        CANCELLED = "cancelled", "已取消"
 
     name = models.CharField(max_length=255, help_text="任务名称")
     target = models.CharField(max_length=255, help_text="扫描目标 (IP/域名)")

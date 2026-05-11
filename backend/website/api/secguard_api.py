@@ -24,6 +24,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.db.models import Q, Count
+from django.shortcuts import get_object_or_404
 
 from website.models import (
     Report,
@@ -1239,6 +1240,142 @@ def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
         "scanner_type": task.scanner_type,
         "message": message
     }
+
+
+@router.delete("/scans/{scan_id}")
+def delete_scan(request: HttpRequest, scan_id: int):
+    """删除单个扫描任务（仅限非运行中任务）"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    task = get_object_or_404(ScanTask, id=scan_id)
+    
+    # 权限检查：管理员或任务创建者
+    if not (request.user.is_staff or task.created_by == request.user):
+        raise HttpError(403, "无权删除此任务")
+    
+    # 运行中的任务不能直接删除，需要先取消
+    if task.status == ScanTask.Status.RUNNING:
+        raise HttpError(400, "运行中的任务无法删除，请先取消")
+    
+    task_name = task.name
+    task.delete()
+    
+    return {"success": True, "message": f"任务 '{task_name}' 已删除"}
+
+
+@router.post("/scans/{scan_id}/cancel")
+def cancel_scan_api(request: HttpRequest, scan_id: int):
+    """取消正在运行的扫描任务"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    task = get_object_or_404(ScanTask, id=scan_id)
+    
+    # 权限检查
+    if not (request.user.is_staff or task.created_by == request.user):
+        raise HttpError(403, "无权取消此任务")
+    
+    # 只能取消运行中的任务
+    if task.status != ScanTask.Status.RUNNING:
+        raise HttpError(400, f"当前状态为 '{task.get_status_display()}'，无法取消")
+    
+    from website.scanner import cancel_scan as cancel_scan_impl
+    
+    result = cancel_scan_impl(scan_id)
+    
+    if result['success']:
+        # 无论进程是否存在，都标记为已取消（处理僵尸任务）
+        task.status = ScanTask.Status.CANCELLED
+        task.finished_at = datetime.now()
+        task.save(update_fields=["status", "finished_at"])
+        
+        return {
+            "success": True,
+            "message": f"任务 '{task.name}' 已取消",
+            "status": "cancelled",
+            "detail": result['message']  # 提供详细信息
+        }
+    else:
+        raise HttpError(500, result.get('message', '取消失败'))
+
+
+class BatchDeleteSchema(BaseModel):
+    scan_ids: List[int] = Field(..., description="要删除的任务 ID 列表")
+
+
+@router.delete("/scans/batch")
+def batch_delete_scans(request: HttpRequest, payload: BatchDeleteSchema):
+    """批量删除扫描任务（排除运行中的）"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    if not payload.scan_ids:
+        raise HttpError(400, "请提供要删除的任务 ID 列表")
+    
+    queryset = ScanTask.objects.filter(id__in=payload.scan_ids)
+    
+    # 权限过滤：管理员可删所有，普通用户只能删自己的
+    if not request.user.is_staff:
+        queryset = queryset.filter(created_by=request.user)
+    
+    # 排除运行中的任务
+    running_count = queryset.filter(status=ScanTask.Status.RUNNING).count()
+    deletable = queryset.exclude(status=ScanTask.Status.RUNNING)
+    
+    count, _ = deletable.delete()
+    
+    message = f"成功删除 {count} 个任务"
+    if running_count > 0:
+        message += f"，跳过 {running_count} 个运行中的任务"
+    
+    return {
+        "success": True,
+        "deleted": count,
+        "skipped": running_count,
+        "message": message
+    }
+
+
+@router.post("/scans/{scan_id}/retry")
+def retry_scan(request: HttpRequest, scan_id: int):
+    """重试失败或已取消的扫描任务"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    task = get_object_or_404(ScanTask, id=scan_id)
+    
+    # 权限检查
+    if not (request.user.is_staff or task.created_by == request.user):
+        raise HttpError(403, "无权重试此任务")
+    
+    # 只能重试失败、已取消或已完成的任务
+    retryable_statuses = [ScanTask.Status.FAILED, ScanTask.Status.CANCELLED, ScanTask.Status.FINISHED]
+    if task.status not in retryable_statuses:
+        raise HttpError(400, f"当前状态为 '{task.get_status_display()}'，无法重试（只支持失败/取消/已完成）")
+    
+    # 重置任务状态
+    old_status = task.status
+    task.status = ScanTask.Status.PENDING
+    task.progress = 0
+    task.findings_count = 0
+    task.finished_at = None
+    task.save()
+    
+    try:
+        from website.scanner import launch_scan_async
+        launch_scan_async(task)
+        return {
+            "success": True,
+            "message": f"任务 '{task.name}' 已重新启动",
+            "previous_status": old_status,
+            "new_status": "pending"
+        }
+    except ImportError:
+        return {
+            "success": False,
+            "message": "扫描器不可用"
+        }
 
 
 class ExportSchema(BaseModel):

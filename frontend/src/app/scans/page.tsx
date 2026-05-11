@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { scansApi } from '@/services/api';
-import { Search, Plus, Play, Globe, Filter, Upload, ChevronLeft, ChevronRight, Activity, Loader2, Settings2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Plus, Play, Globe, Filter, Upload, ChevronLeft, ChevronRight, Activity, Loader2, Settings2, ChevronDown, ChevronUp, Trash2, XCircle, RotateCw, CheckSquare } from 'lucide-react';
 
 const MODULE_GROUPS: Record<string, string[]> = {
   "端口扫描": ["port_scan", "icmp_scan"],
@@ -26,34 +26,54 @@ export default function ScansPage() {
   const [hardwareUsage, setHardwareUsage] = useState('high');
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["端口扫描", "子域名", "Web发现", "SSL/TLS"]));
+  const [timeoutMinutes, setTimeoutMinutes] = useState(60);
+  const [timeoutInputValue, setTimeoutInputValue] = useState('60');
   const [scans, setScans] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);  // 后台刷新状态（不显示loading）
   const perPage = 20;
 
-  const fetchScans = async () => {
-    setLoading(true);
+  const fetchScans = async (showLoading: boolean = true) => {
+    if (showLoading) setLoading(true);
+    else setRefreshing(true);  // 后台刷新用单独的状态
+    
     try {
       const params: Record<string, string | number> = { page, per_page: perPage };
       if (statusFilter) params.status = statusFilter;
       const data = await scansApi.list(params);
       setScans(Array.isArray(data.items) ? data.items : []);
       setTotal(data.total_count || 0);
-    } catch {} finally { setLoading(false); }
+    } catch {} finally { 
+      if (showLoading) setLoading(false);
+      else setRefreshing(false);
+    }
   };
 
-  useEffect(() => { fetchScans(); }, [page, statusFilter]);
+  useEffect(() => { fetchScans(true); }, [page, statusFilter]);
 
-  // 轮询活跃任务进度
+  // 轮询活跃任务进度（使用 ref 避免复杂依赖）
+  const activeRef = useRef(false);
+  
   useEffect(() => {
     const hasActive = scans.some(s => s.status === 'running' || s.status === 'pending');
-    if (!hasActive) return;
-    const timer = setInterval(fetchScans, 3000);
-    return () => clearInterval(timer);
-  }, [scans.some(s => s.status === 'running' || s.status === 'pending')]);
+    
+    if (hasActive && !activeRef.current) {
+      activeRef.current = true;
+      const timer = setInterval(() => fetchScans(false), 3000);  // 后台刷新，不显示loading
+      return () => {
+        clearInterval(timer);
+        activeRef.current = false;
+      };
+    } else if (!hasActive && activeRef.current) {
+      activeRef.current = false;
+    }
+  }, [scans]);
 
   const toggleGroup = (group: string) => {
     setExpandedGroups(prev => {
@@ -83,7 +103,11 @@ export default function ScansPage() {
     if (!targetUrl) return;
     setCreating(true);
     try {
-      const payload: any = { target: targetUrl, scanner_type: scanType };
+      const payload: any = { 
+        target: targetUrl, 
+        scanner_type: scanType,
+        timeout_minutes: timeoutMinutes  // 使用用户设置的超时时间
+      };
       if (scanType === 'custom') {
         payload.selected_modules = Array.from(selectedModules).join(',');
         payload.thread_count = threadCount;
@@ -104,12 +128,106 @@ export default function ScansPage() {
     } finally { setCreating(false); }
   };
 
+  const handleDelete = async (id: number) => {
+    console.log('🗑️ 删除任务:', id);
+    
+    if (!confirm(`确定要删除任务 #${id} 吗？此操作不可恢复！`)) {
+      console.log('❌ 用户取消删除');
+      return;
+    }
+    
+    try {
+      console.log('📤 发送删除请求...');
+      const response = await scansApi.delete(id);
+      console.log('✅ 删除成功:', response);
+      
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+      
+      alert(`✅ 任务 #${id} 已成功删除`);
+      fetchScans();
+    } catch (err: any) {
+      console.error('❌ 删除失败:', err);
+      
+      let errorMsg = '删除失败';
+      if (err?.message) {
+        if (err.message.includes('运行中')) {
+          errorMsg = '⚠️ 运行中的任务无法删除！请先点击"取消"按钮停止扫描';
+        } else if (err.message.includes('无权')) {
+          errorMsg = '❌ 无权删除此任务（只能删除自己创建的任务）';
+        } else if (err.message.includes('401') || err.message.includes('登录')) {
+          errorMsg = '❌ 登录已过期，请重新登录';
+        } else {
+          errorMsg = `❌ ${err.message}`;
+        }
+      }
+      
+      alert(errorMsg);
+    }
+  };
+
+  const handleCancel = async (id: number) => {
+    if (!confirm('确定要取消此扫描任务吗？')) return;
+    try {
+      await scansApi.cancel(id);
+      fetchScans();
+    } catch (err: any) {
+      alert(err.message || '取消失败');
+    }
+  };
+
+  const handleRetry = async (id: number) => {
+    if (!confirm('确定要重新运行此任务吗？')) return;
+    try {
+      await scansApi.retry(id);
+      fetchScans();
+    } catch (err: any) {
+      alert(err.message || '重试失败');
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selectedIds.size === scans.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(scans.map(s => s.id)));
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) {
+      alert('请先选择要删除的任务');
+      return;
+    }
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个任务吗？`)) return;
+    
+    setBatchDeleting(true);
+    try {
+      const result = await scansApi.batchDelete(Array.from(selectedIds));
+      alert(result.message || `成功删除 ${result.deleted} 个任务`);
+      setSelectedIds(new Set());
+      fetchScans();
+    } catch (err: any) {
+      alert(err.message || '批量删除失败');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
   const statusInfo = (s: string) => {
     const map: Record<string, { label: string; color: string; bg: string }> = {
       pending: { label: '排队中', color: 'text-yellow-400', bg: 'bg-yellow-400' },
       running: { label: '运行中', color: 'text-cyan-400', bg: 'bg-cyan-400' },
       finished: { label: '已完成', color: 'text-green-400', bg: 'bg-green-400' },
       failed: { label: '失败', color: 'text-red-400', bg: 'bg-red-400' },
+      cancelled: { label: '已取消', color: 'text-gray-400', bg: 'bg-gray-400' },
     };
     return map[s] || { label: s, color: 'text-gray-400', bg: 'bg-gray-400' };
   };
@@ -193,10 +311,43 @@ export default function ScansPage() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
                   <div>
                     <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">
-                      超时 (分钟) <span className="text-gray-600">不杀进程</span>
+                      超时 (分钟) <span className="text-primary font-bold">{timeoutMinutes}</span>
                     </label>
-                    <input type="number" min={10} max={600} value={60}
-                      className="w-full px-4 py-2.5 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary" />
+                    <input 
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={timeoutInputValue}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        // 允许空字符串或纯数字
+                        if (raw === '' || /^\d+$/.test(raw)) {
+                          setTimeoutInputValue(raw);
+                          const num = parseInt(raw);
+                          if (!isNaN(num) && num >= 1 && num <= 999) {
+                            setTimeoutMinutes(num);
+                          }
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const num = parseInt(e.target.value);
+                        if (isNaN(num) || num < 1 || num > 999) {
+                          setTimeoutInputValue('60');
+                          setTimeoutMinutes(60);
+                        } else {
+                          setTimeoutInputValue(String(num));
+                          setTimeoutMinutes(num);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                      placeholder="例如: 30"
+                      className="w-full px-4 py-2.5 bg-dark-card border border-dark-border rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all cursor-text [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">范围: 1-999 分钟 (建议: quick=5, deep=10, custom=15)</p>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">
@@ -273,9 +424,18 @@ export default function ScansPage() {
 
           <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
             <div className="p-6 border-b border-dark-border flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-primary" />
-                <h3 className="text-lg font-semibold text-white">扫描任务列表</h3>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <Filter className="w-5 h-5 text-primary" />
+                  <h3 className="text-lg font-semibold text-white">扫描任务列表</h3>
+                </div>
+                {selectedIds.size > 0 && (
+                  <button onClick={handleBatchDelete} disabled={batchDeleting}
+                    className="px-4 py-2 bg-red-500/20 border border-red-500/50 text-red-400 rounded-lg hover:bg-red-500/30 transition-all flex items-center space-x-2 text-sm font-medium disabled:opacity-50">
+                    <Trash2 className="w-4 h-4" />
+                    <span>{batchDeleting ? '删除中...' : `批量删除 (${selectedIds.size})`}</span>
+                  </button>
+                )}
               </div>
               <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
                 className="px-4 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary cursor-pointer">
@@ -284,29 +444,46 @@ export default function ScansPage() {
                 <option value="running">运行中</option>
                 <option value="finished">已完成</option>
                 <option value="failed">失败</option>
+                <option value="cancelled">已取消</option>
               </select>
             </div>
 
             <table className="w-full">
               <thead>
                 <tr className="border-b border-dark-border">
+                  <th className="text-left px-4 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider w-12">
+                    <input type="checkbox" checked={selectedIds.size === scans.length && scans.length > 0}
+                      onChange={selectAll}
+                      className="rounded bg-dark-bg border-dark-border accent-primary" />
+                  </th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">任务ID</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">目标 URL</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">类型</th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">状态</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">进度</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">发现数</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">创建时间</th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider w-48">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-dark-border">
                 {loading ? (
-                  <tr><td colSpan={6} className="px-6 py-12 text-center"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></td></tr>
+                  <tr><td colSpan={9} className="px-6 py-12 text-center"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></td></tr>
                 ) : scans.length === 0 ? (
-                  <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">暂无扫描任务，请创建新任务</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">暂无扫描任务，请创建新任务</td></tr>
                 ) : scans.map((task) => {
                   const si = statusInfo(task.status);
+                  const canDelete = task.status !== 'running';
+                  const canCancel = task.status === 'running';
+                  const canRetry = ['failed', 'cancelled', 'finished'].includes(task.status);
+                  
                   return (
-                    <tr key={task.id} className="hover:bg-dark-hover transition-colors">
+                    <tr key={task.id} className={`hover:bg-dark-hover transition-colors ${selectedIds.has(task.id) ? 'bg-primary/5' : ''}`}>
+                      <td className="px-4 py-4">
+                        <input type="checkbox" checked={selectedIds.has(task.id)}
+                          onChange={() => toggleSelect(task.id)}
+                          className="rounded bg-dark-bg border-dark-border accent-primary" />
+                      </td>
                       <td className="px-6 py-4"><span className="text-sm font-mono text-primary">{task.scan_id || `SC-${task.id}`}</span></td>
                       <td className="px-6 py-4"><span className="text-sm text-gray-300">{task.target}</span></td>
                       <td className="px-6 py-4">
@@ -316,6 +493,11 @@ export default function ScansPage() {
                           'bg-orange-500/20 text-orange-400'
                         }`}>
                           {task.scanner_type === 'deep' ? '深度' : task.scanner_type === 'quick' ? '快速' : task.scanner_type === 'custom' ? '自定义' : task.scanner_type}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${si.color} bg-opacity-10`} style={{ backgroundColor: `${si.bg}20` }}>
+                          {si.label}
                         </span>
                       </td>
                       <td className="px-6 py-4 min-w-[180px]">
@@ -335,7 +517,7 @@ export default function ScansPage() {
                               </div>
                               <span className="text-xs text-green-400 font-mono">100%</span>
                             </div>
-                          ) : task.status === 'failed' ? (
+                          ) : task.status === 'failed' || task.status === 'cancelled' ? (
                             <div className="flex items-center space-x-2">
                               <div className="flex-1 h-2 bg-red-500/30 rounded-full overflow-hidden">
                                 <div className="h-full bg-red-500 rounded-full" style={{ width: `${task.progress || 0}%` }} />
@@ -349,6 +531,31 @@ export default function ScansPage() {
                       </td>
                       <td className="px-6 py-4"><span className="text-sm font-bold text-white">{task.findings_count ?? '--'}</span></td>
                       <td className="px-6 py-4 whitespace-nowrap"><span className="text-sm text-gray-400">{task.created_at?.substring(0, 10)}</span></td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center space-x-2">
+                          {canDelete && (
+                            <button onClick={() => handleDelete(task.id)}
+                              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                              title="删除任务">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canCancel && (
+                            <button onClick={() => handleCancel(task.id)}
+                              className="p-1.5 text-gray-400 hover:text-orange-400 hover:bg-orange-500/10 rounded transition-colors"
+                              title="取消扫描">
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canRetry && (
+                            <button onClick={() => handleRetry(task.id)}
+                              className="p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-500/10 rounded transition-colors"
+                              title="重新运行">
+                              <RotateCw className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}

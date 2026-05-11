@@ -7,6 +7,10 @@ logger = logging.getLogger(__name__)
 NETTACKER_CMD = os.environ.get("NETTACKER_CMD", "nettacker")
 OUTPUT_DIR = "/tmp/nettacker_results"
 
+# 活跃扫描进程字典 {scan_task_id: subprocess.Popen}
+_active_scans: dict[int, subprocess.Popen] = {}
+_scans_lock = threading.Lock()
+
 # 模块分组（前端自定义扫描用）
 MODULE_GROUPS = {
     "端口扫描": ["port_scan", "icmp_scan"],
@@ -102,7 +106,11 @@ def _build_scan_args(task):
     # 性能参数
     extra_args.extend(["-t", str(task.thread_count)])
     extra_args.extend(["-M", str(task.parallel_modules)])
-    extra_args.extend(["--set-hardware-usage", task.hardware_usage])
+
+    # 硬件使用率映射：Django模型值 -> Nettacker支持值
+    hw_map = {"low": "low", "medium": "normal", "high": "high", "maximum": "maximum"}
+    hw_usage = hw_map.get(task.hardware_usage, "normal")
+    extra_args.extend(["--set-hardware-usage", hw_usage])
 
     return extra_args
 
@@ -199,32 +207,63 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
 
     logger.info(f"Running Nettacker via '{' '.join(nettacker_bin)}': {' '.join(cmd[len(nettacker_bin):])}")
 
+    # 扫描超时设置（秒）：优先使用任务配置，否则按扫描类型默认值
+    user_timeout_minutes = getattr(task, 'timeout_minutes', None) or 60
+    default_timeouts = {"quick": 5, "deep": 10, "custom": 15}  # 默认分钟数
+    TIMEOUT_SECONDS = (user_timeout_minutes if user_timeout_minutes > 0 else default_timeouts.get(scanner_type, 10)) * 60
+    logger.info(f"Timeout set to {TIMEOUT_SECONDS}s ({TIMEOUT_SECONDS//60}min) for task {scan_task_id}")
+    start_time = datetime.now()
+
     try:
-        # Popen 流式读取，无硬超时；stderr 合并到 stdout 避免管道满死锁
+        # Popen 流式读取，带超时控制；stderr 合并到 stdout 避免管道满死锁
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1)
+        
+        # 注册到活跃扫描进程字典
+        with _scans_lock:
+            _active_scans[scan_task_id] = proc
+        
         total_modules = 0
         current_module = 0
 
-        # 流式读取 stdout，解析进度
-        for line in proc.stdout:
-            line = line.strip()
-            # 解析日志行: [timestamp][+++] ... module-thread X/Y ...
-            m = re.search(r'module-thread\s+(\d+)/(\d+)', line)
-            if m:
-                # 取 max 避免多线程并行输出导致进度倒退
-                current_module = max(current_module, int(m.group(1)))
-                total_modules = max(total_modules, int(m.group(2)))
-                if total_modules > 0:
-                    progress = min(99, int(current_module / total_modules * 100))
-                    task.progress = progress
-                    task.save(update_fields=["progress"])
+        # 流式读取 stdout，解析进度（带超时检查）
+        while True:
+            try:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                line = line.strip()
 
-            # 日志透传
-            if any(kw in line.lower() for kw in ("[+]", "[x]", "[!]", "error", "done")):
-                logger.info(f"Nettacker: {line[:300]}")
+                # 解析日志行: [timestamp][+++] ... module-thread X/Y ...
+                m = re.search(r'module-thread\s+(\d+)/(\d+)', line)
+                if m:
+                    # 取 max 避免多线程并行输出导致进度倒退
+                    current_module = max(current_module, int(m.group(1)))
+                    total_modules = max(total_modules, int(m.group(2)))
+                    if total_modules > 0:
+                        progress = min(99, int(current_module / total_modules * 100))
+                        task.progress = progress
+                        task.save(update_fields=["progress"])
 
-        proc.wait()
+                # 日志透传
+                if any(kw in line.lower() for kw in ("[+]", "[x]", "[!]", "error", "done")):
+                    logger.info(f"Nettacker: {line[:300]}")
+
+                # 检查是否超时
+                elapsed = (datetime.now() - start_time).total_seconds()
+                if elapsed > TIMEOUT_SECONDS:
+                    logger.warning(f"Scan timeout after {elapsed:.0f}s (limit: {TIMEOUT_SECONDS}s)")
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    raise TimeoutError(f"扫描超时 ({TIMEOUT_SECONDS}秒)")
+
+            except ValueError:
+                break
+
+        proc.wait(timeout=30)
         if proc.returncode != 0:
             logger.error(f"Nettacker exited with code {proc.returncode}")
 
@@ -233,6 +272,7 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
         task.save(update_fields=["progress"])
 
         findings = []
+        data = []  # 初始化，避免作用域错误
 
         # 从 JSON 输出文件解析结果
         for jf in [output_file] + sorted(glob.glob(os.path.join(OUTPUT_DIR, "**/*.json"), recursive=True)):
@@ -289,8 +329,22 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
             except (json.JSONDecodeError, FileNotFoundError, OSError):
                 continue
 
-        # 写入 Report
+        # 写入 Report - 自动创建默认项目（如果不存在）
+        from website.models import Project, Organization
+
         default_project = Project.objects.first()
+        if not default_project:
+            default_org = Organization.objects.first()
+            if not default_org:
+                default_org = Organization.objects.create(name="默认组织", slug="default")
+            default_project = Project.objects.create(
+                name="默认扫描项目",
+                slug="default-scan-project",
+                organization=default_org,
+                status="production"
+            )
+            logger.info(f"Created default project for scan results: {default_project.id}")
+
         for f in findings[:50]:
             Report.objects.create(
                 title=f["title"][:255],
@@ -333,6 +387,90 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
             target_id=str(task.id), detail=f"扫描异常: {str(e)[:200]}", team=task.team,
         )
         logger.error(f"Scan {scan_task_id} failed: {e}")
+    
+    finally:
+        # 从活跃扫描进程字典中注销
+        with _scans_lock:
+            _active_scans.pop(scan_task_id, None)
+
+
+def cancel_scan(scan_task_id: int) -> dict:
+    """取消正在运行的扫描任务。
+
+    Args:
+        scan_task_id: 扫描任务 ID
+
+    Returns:
+        dict: {
+            'success': bool,          # 是否成功
+            'status': str,            # 'cancelled' | 'already_finished' | 'not_found'
+            'message': str            # 说明信息
+        }
+    """
+    with _scans_lock:
+        proc = _active_scans.get(scan_task_id)
+    
+    # 情况1：进程不存在于字典中（可能是容器重启后丢失）
+    if not proc:
+        return {
+            'success': True,
+            'status': 'cancelled',
+            'message': f'任务 {scan_task_id} 的进程记录不存在，视为已终止'
+        }
+    
+    # 情况2：进程已经结束（僵尸任务）
+    if proc.poll() is not None:
+        # 清理字典中的过期条目
+        with _scans_lock:
+            _active_scans.pop(scan_task_id, None)
+        
+        return {
+            'success': True,
+            'status': 'cancelled',
+            'message': f'任务 {scan_task_id} 的进程已结束 (exit code: {proc.returncode})'
+        }
+    
+    # 情况3：进程正在运行，执行真正的取消操作
+    try:
+        logger.info(f'Cancelling scan task {scan_task_id}, terminating process...')
+        
+        # 先优雅终止 (SIGTERM)
+        proc.terminate()
+        
+        # 等待最多 10 秒
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            # 强制杀死 (SIGKILL)
+            logger.warning(f'Scan task {scan_task_id} did not terminate gracefully, killing...')
+            proc.kill()
+            proc.wait(timeout=5)
+        
+        # 从活跃扫描进程字典中移除
+        with _scans_lock:
+            _active_scans.pop(scan_task_id, None)
+        
+        logger.info(f'Successfully cancelled scan task {scan_task_id}')
+        
+        return {
+            'success': True,
+            'status': 'cancelled',
+            'message': f'任务 {scan_task_id} 已成功取消并终止'
+        }
+        
+    except Exception as e:
+        logger.error(f'Failed to cancel scan task {scan_task_id}: {e}')
+        return {
+            'success': False,
+            'status': 'error',
+            'message': f'取消失败: {str(e)}'
+        }
+
+
+def get_active_scan_ids() -> list[int]:
+    """获取当前所有活跃扫描任务的 ID 列表。"""
+    with _scans_lock:
+        return [sid for sid, proc in _active_scans.items() if proc.poll() is None]
 
 
 def _map_severity(risk: str) -> str:
