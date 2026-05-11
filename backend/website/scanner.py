@@ -200,8 +200,8 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
     logger.info(f"Running Nettacker via '{' '.join(nettacker_bin)}': {' '.join(cmd[len(nettacker_bin):])}")
 
     try:
-        # Popen 流式读取，无硬超时
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        # Popen 流式读取，无硬超时；stderr 合并到 stdout 避免管道满死锁
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1)
         total_modules = 0
         current_module = 0
@@ -212,7 +212,8 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
             # 解析日志行: [timestamp][+++] ... module-thread X/Y ...
             m = re.search(r'module-thread\s+(\d+)/(\d+)', line)
             if m:
-                current_module = int(m.group(1))
+                # 取 max 避免多线程并行输出导致进度倒退
+                current_module = max(current_module, int(m.group(1)))
                 total_modules = max(total_modules, int(m.group(2)))
                 if total_modules > 0:
                     progress = min(99, int(current_module / total_modules * 100))
@@ -224,9 +225,8 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
                 logger.info(f"Nettacker: {line[:300]}")
 
         proc.wait()
-        stderr_out = proc.stderr.read()
         if proc.returncode != 0:
-            logger.error(f"Nettacker exited with code {proc.returncode}: {stderr_out[:500]}")
+            logger.error(f"Nettacker exited with code {proc.returncode}")
 
         # 标记完成
         task.progress = 100

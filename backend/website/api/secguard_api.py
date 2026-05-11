@@ -1411,7 +1411,7 @@ def list_assets(request: HttpRequest):
         sev_counts = {}
         if vuln_count > 0:
             for s in report_qs.filter(affected_url=target_url).values('severity').annotate(
-                cnt=Count('id')
+                cnt=Count('vuln_id')
             ):
                 sev_counts[s['severity']] = s['cnt']
 
