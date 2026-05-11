@@ -5,7 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { teamsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Users, UserPlus, Check, X, Mail, Shield, Loader2, AlertCircle, Trash2, Search, Building, ArrowLeftRight } from 'lucide-react';
+import { Users, UserPlus, Check, X, Mail, Shield, Loader2, AlertCircle, Trash2, Search, Building, ArrowLeftRight, AlertTriangle, LogOut, PlusCircle } from 'lucide-react';
 
 const ROLE_OPTIONS = [
   { value: 'team_lead', label: '安全负责人' },
@@ -33,6 +33,7 @@ export default function TeamPage() {
   const [pendingInviteInfo, setPendingInviteInfo] = useState<any>(null);
   const [myTeams, setMyTeams] = useState<any[]>([]);
   const [switching, setSwitching] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const isAdmin = user?.role === '团队管理员' || user?.is_staff;
   const hasTeam = !!(user?.team_id);
@@ -100,6 +101,37 @@ export default function TeamPage() {
     if (teamId === user?.team_id) return;
     setSwitching(true);
     try { const r = await teamsApi.switchTeam(teamId); await refreshUser(); showMsg(r.message || '已切换团队'); } catch (err: any) { showMsg(err.message); } finally { setSwitching(false); }
+  };
+
+  const handleLeave = async () => {
+    if (!confirm('确定要退出当前团队吗？退出后您将无法查看团队数据，但仍可看到自己创建的个人数据。')) return;
+    setActionLoading(true);
+    try {
+      const r = await teamsApi.leave();
+      await refreshUser();
+      showMsg(r.message || '已成功退出团队');
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (err: any) {
+      showMsg(err.message || '退出失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDissolve = async () => {
+    if (!confirm('⚠️ 确定要解散团队吗？此操作不可恢复！团队将被永久删除。')) return;
+    if (!confirm('再次确认：确定要解散团队吗？')) return;
+    setActionLoading(true);
+    try {
+      const r = await teamsApi.dissolve();
+      await refreshUser();
+      showMsg(r.message || '团队已解散');
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (err: any) {
+      showMsg(err.message || '解散失败');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   if (loading) return <div className="min-h-screen bg-dark-bg"><Sidebar /><div className="ml-64"><Header /><div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div></div></div>;
@@ -253,6 +285,31 @@ export default function TeamPage() {
           ))}
         </div>
 
+        <div className="flex items-center justify-between mt-6">
+          <div className="text-sm text-gray-500">
+            {isAdmin && members.length <= 1 && (
+              <span className="text-yellow-500">⚠️ 您是唯一成员，可以安全解散团队</span>
+            )}
+            {!isAdmin && (
+              <span>退出后仍可查看个人数据</span>
+            )}
+          </div>
+          <div className="flex items-center space-x-3">
+            {isAdmin && members.length <= 1 && (
+              <button onClick={handleDissolve} disabled={actionLoading}
+                className="px-5 py-2.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-600/30 font-medium text-sm flex items-center space-x-2 transition-all">
+                <AlertTriangle className="w-4 h-4" /><span>解散团队</span>
+              </button>
+            )}
+            {!isAdmin && (
+              <button onClick={handleLeave} disabled={actionLoading}
+                className="px-5 py-2.5 bg-orange-600/20 border border-orange-500/30 text-orange-400 rounded-lg hover:bg-orange-600/30 font-medium text-sm flex items-center space-x-2 transition-all">
+                <LogOut className="w-4 h-4" /><span>退出团队</span>
+              </button>
+            )}
+          </div>
+        </div>
+
         {tab === 'members' && (
           <div className="bg-dark-card border border-dark-border rounded-xl overflow-hidden">
             <table className="w-full"><thead><tr className="border-b border-dark-border"><th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">用户</th><th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">角色</th><th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">加入</th><th className="text-right px-6 py-4 text-xs font-medium text-gray-400 uppercase">操作</th></tr></thead>
@@ -314,6 +371,142 @@ export default function TeamPage() {
             <p className="text-xs text-gray-500 mt-3">邀请后需对方接受才能加入团队</p>
           </div>
         )}
+
+        {/* 📋 我的所有团队列表 */}
+        {myTeams.length > 0 && (
+          <div className="bg-dark-card border border-dark-border rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white flex items-center space-x-2">
+                <Building className="w-5 h-5 text-primary" />
+                <span>我的所有团队 ({myTeams.length})</span>
+              </h3>
+              <span className="text-xs text-gray-500">点击切换管理不同团队</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {myTeams.map((team: any) => {
+                const isCurrentTeam = team.team_id === user?.team_id;
+                const isAccepted = team.status === 'accepted';
+                const isPending = team.status === 'pending';
+
+                return (
+                  <div
+                    key={team.team_id}
+                    className={`relative p-4 rounded-lg border transition-all ${
+                      isCurrentTeam
+                        ? 'bg-primary/10 border-primary/30 shadow-lg shadow-primary/10'
+                        : isPending
+                          ? 'bg-gray-500/5 border-gray-600/30 opacity-60'
+                          : 'bg-dark-bg border-dark-border hover:border-primary/30 hover:bg-primary/5'
+                    }`}
+                  >
+                    {/* 当前团队标识 */}
+                    {isCurrentTeam && isAccepted && (
+                      <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-primary text-white text-xs rounded-full font-medium">
+                        当前
+                      </div>
+                    )}
+
+                    {/* 待审批标识 */}
+                    {isPending && (
+                      <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-yellow-500 text-black text-xs rounded-full font-medium">
+                        待审批
+                      </div>
+                    )}
+
+                    {/* 团队信息 */}
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between">
+                        <h4 className={`font-medium ${isPending ? 'text-gray-400' : 'text-white'}`}>
+                          {team.team_name}
+                        </h4>
+                        <span className={`text-xs px-2 py-0.5 rounded ${
+                          team.role === 'admin'
+                            ? 'bg-purple-500/20 text-purple-400'
+                            : 'bg-blue-500/20 text-blue-400'
+                        }`}>
+                          {team.role_label}
+                        </span>
+                      </div>
+
+                      {/* 数据统计 */}
+                      <div className="grid grid-cols-3 gap-2 text-xs text-gray-500">
+                        <div className="text-center p-1.5 bg-dark-card/50 rounded">
+                          <p className="font-medium text-white">{team.scan_count}</p>
+                          <p>任务</p>
+                        </div>
+                        <div className="text-center p-1.5 bg-dark-card/50 rounded">
+                          <p className="font-medium text-white">{team.vuln_count}</p>
+                          <p>漏洞</p>
+                        </div>
+                        <div className="text-center p-1.5 bg-dark-card/50 rounded">
+                          <p className="font-medium text-white">{team.asset_count}</p>
+                          <p>资产</p>
+                        </div>
+                      </div>
+
+                      {/* 操作按钮 */}
+                      {!isCurrentTeam && isAccepted && (
+                        <button
+                          onClick={() => handleSwitchTeam(team.team_id)}
+                          disabled={switching}
+                          className="w-full mt-2 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary rounded-lg text-xs font-medium hover:bg-primary/20 transition-all disabled:opacity-50 flex items-center justify-center space-x-1"
+                        >
+                          <ArrowLeftRight className="w-3 h-3" />
+                          <span>切换到此团队</span>
+                        </button>
+                      )}
+
+                      {isCurrentTeam && (
+                        <div className="mt-2 text-xs text-center text-primary font-medium">
+                          ✓ 正在管理此团队
+                        </div>
+                      )}
+
+                      {isPending && (
+                        <div className="mt-2 text-xs text-center text-yellow-400">
+                          等待管理员审核...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 提示信息 */}
+            <p className="text-xs text-gray-500 mt-4 text-center">
+              💡 提示：切换团队后，此页面的成员管理、数据统计等都会更新为该团队的信息
+            </p>
+          </div>
+        )}
+
+        <div className="mt-8 border-t border-dark-border pt-8">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center space-x-2"><PlusCircle className="w-5 h-5 text-primary" /><span>其他操作</span></h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-dark-card border border-dark-border rounded-xl p-6">
+              <div className="flex items-center space-x-2 mb-4"><Building className="w-5 h-5 text-primary" /><h3 className="text-lg font-semibold text-white">创建新团队</h3></div>
+              <input type="text" value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="输入新团队名称"
+                className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary mb-3" />
+              <button onClick={handleCreateTeam} disabled={!teamName.trim() || actionLoading}
+                className="w-full px-4 py-3 bg-gradient-to-r from-primary to-cyan-400 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all disabled:opacity-50 flex items-center justify-center space-x-2">
+                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building className="w-4 h-4" />}<span>创建新团队</span>
+              </button>
+              <p className="text-xs text-gray-500 mt-3">创建后将自动成为该团队的管理员</p>
+            </div>
+
+            <div className="bg-dark-card border border-dark-border rounded-xl p-6">
+              <div className="flex items-center space-x-2 mb-4"><Search className="w-5 h-5 text-primary" /><h3 className="text-lg font-semibold text-white">加入其他团队</h3></div>
+              <input type="text" value={joinTeamId} onChange={(e) => setJoinTeamId(e.target.value)} placeholder="输入要加入的团队ID"
+                className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary mb-3" />
+              <button onClick={handleJoinTeam} disabled={!joinTeamId.trim() || actionLoading}
+                className="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-500 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50 flex items-center justify-center space-x-2">
+                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}<span>申请加入</span>
+              </button>
+              <p className="text-xs text-gray-500 mt-3">需要等待目标团队管理员审核通过</p>
+            </div>
+          </div>
+        </div>
       </main>
     </div></div>
   );

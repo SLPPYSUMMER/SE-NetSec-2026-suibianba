@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { assetsApi } from '@/services/api';
-import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, Smartphone, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu } from 'lucide-react';
+import { assetsApi, teamsApi } from '@/services/api';
+import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, Smartphone, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Check } from 'lucide-react';
 
 const assetTypes = ['全部', 'host', 'port', 'service', 'subdomain', 'web_tech', 'ssl_cert'];
 const typeLabels: Record<string, string> = {
@@ -30,6 +30,10 @@ export default function AssetsPage() {
   const [selectedStatus, setSelectedStatus] = useState('全部');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
+  const [userTeams, setUserTeams] = useState<any[]>([]);
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
+  const [showTeamDropdown, setShowTeamDropdown] = useState(false);
 
   const fetchAssets = async () => {
     setLoading(true);
@@ -42,6 +46,19 @@ export default function AssetsPage() {
   };
 
   useEffect(() => { fetchAssets(); }, []);
+
+  // 加载用户的团队列表
+  useEffect(() => {
+    const loadTeams = async () => {
+      try {
+        const data = await teamsApi.myTeams();
+        setUserTeams(data.items || []);
+      } catch (err) {
+        console.error('加载团队列表失败:', err);
+      }
+    };
+    loadTeams();
+  }, []);
 
   const toggleExpand = (id: number) => {
     setExpandedRows(prev => {
@@ -57,8 +74,37 @@ export default function AssetsPage() {
     const matchesSearch = !searchQuery ||
       asset.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       String(asset.id).includes(searchQuery);
-    return matchesType && matchesStatus && matchesSearch;
+    let matchesDataSource = dataSource === 'all';
+    if (dataSource === 'personal') {
+      matchesDataSource = asset.data_source === 'personal';
+    } else if (dataSource === 'team') {
+      if (selectedTeamIds.size === 0) {
+        matchesDataSource = asset.data_source === 'team';
+      } else {
+        matchesDataSource = asset.team_id && selectedTeamIds.has(asset.team_id);
+      }
+    }
+    return matchesType && matchesStatus && matchesSearch && matchesDataSource;
   });
+
+  const personalCount = assets.filter(a => a.data_source === 'personal').length;
+  const teamCount = assets.filter(a => a.data_source === 'team').length;
+
+  const toggleTeamSelection = (teamId: number) => {
+    setSelectedTeamIds(prev => {
+      const next = new Set(prev);
+      next.has(teamId) ? next.delete(teamId) : next.add(teamId);
+      return next;
+    });
+  };
+
+  const toggleAllTeams = () => {
+    if (selectedTeamIds.size === userTeams.length && userTeams.length > 0) {
+      setSelectedTeamIds(new Set());
+    } else {
+      setSelectedTeamIds(new Set(userTeams.map(t => t.team_id)));
+    }
+  };
 
   if (loading) {
     return (
@@ -151,6 +197,105 @@ export default function AssetsPage() {
           </div>
 
           <div className="bg-dark-card rounded-xl border border-dark-border overflow-hidden">
+            <div className="p-6 border-b border-dark-border flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                {/* 数据来源 Tab 切换（含团队下拉） */}
+                <div className="flex bg-dark-bg rounded-lg p-1 space-x-1 relative">
+                  {[
+                    { key: 'all', label: `全部 (${assets.length})`, icon: Layers },
+                    { key: 'personal', label: `👤 个人 (${personalCount})`, icon: User },
+                    { key: 'team', label: `🏢 团队 (${teamCount})${selectedTeamIds.size > 0 && selectedTeamIds.size < userTeams.length ? ` ✓${selectedTeamIds.size}` : ''}`, icon: Building, hasDropdown: true },
+                  ].map(tab => (
+                    <div key={tab.key} className="relative">
+                      <button
+                        onClick={() => {
+                          if (tab.hasDropdown) {
+                            setShowTeamDropdown(!showTeamDropdown);
+                          } else {
+                            setDataSource(tab.key as any);
+                            setShowTeamDropdown(false);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 ${
+                          dataSource === tab.key
+                            ? 'bg-primary text-white shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <tab.icon className="w-3.5 h-3.5" />
+                        <span>{tab.label}</span>
+                        {tab.hasDropdown && userTeams.length > 0 && (
+                          <ChevronDown className={`w-3 h-3 transition-transform ${showTeamDropdown ? 'rotate-180' : ''}`} />
+                        )}
+                      </button>
+                      {/* 团队下拉菜单 */}
+                      {tab.hasDropdown && showTeamDropdown && dataSource === 'team' && (
+                        <div className="absolute top-full left-0 mt-2 w-64 bg-dark-card border border-dark-border rounded-lg shadow-xl z-50 overflow-hidden">
+                          <div className="p-3 border-b border-dark-border">
+                            <button
+                              onClick={toggleAllTeams}
+                              className="w-full px-3 py-2 rounded-md text-xs font-medium bg-dark-bg hover:bg-dark-hover transition-all flex items-center justify-between"
+                            >
+                              <span>{selectedTeamIds.size === userTeams.length && userTeams.length > 0 ? '☑ 取消全选' : '☐ 全选所有团队'}</span>
+                              <span className="text-gray-500">{selectedTeamIds.size}/{userTeams.length}</span>
+                            </button>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto p-2 space-y-1">
+                            {userTeams.map(team => {
+                              const isPending = team.status === 'pending';
+                              const isAccepted = team.status === 'accepted';
+                              return (
+                              <label
+                                key={team.team_id}
+                                className={`flex items-center space-x-3 px-3 py-2 rounded-md transition-all ${
+                                  isPending
+                                    ? 'opacity-50 cursor-not-allowed bg-gray-500/5'
+                                    : selectedTeamIds.has(team.team_id)
+                                      ? 'bg-primary/10 border border-primary/30 cursor-pointer'
+                                      : 'hover:bg-dark-hover cursor-pointer'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedTeamIds.has(team.team_id)}
+                                  onChange={() => !isPending && toggleTeamSelection(team.team_id)}
+                                  disabled={isPending}
+                                  className="rounded bg-dark-bg border-dark-border accent-primary disabled:opacity-50"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center space-x-2">
+                                    <Building className={`w-4 h-4 flex-shrink-0 ${isAccepted ? 'text-green-400' : 'text-gray-400'}`} />
+                                    <span className={`text-sm font-medium truncate ${isPending ? 'text-gray-400' : 'text-white'}`}>{team.team_name}</span>
+                                    {team.is_active && isAccepted && (
+                                      <span className="px-1.5 py-0.5 bg-primary/20 text-primary text-xs rounded">当前</span>
+                                    )}
+                                    {isPending && (
+                                      <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded">待审批</span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-0.5">
+                                    {team.asset_count} 资产 · {team.vuln_count} 漏洞
+                                    {isPending && ` · ${team.status_label || '等待审核'}`}
+                                  </div>
+                                </div>
+                                {!isPending && selectedTeamIds.has(team.team_id) && (
+                                  <Check className="w-4 h-4 text-primary flex-shrink-0" />
+                                )}
+                              </label>
+                              );
+                            })}
+                          </div>
+                          {userTeams.length === 0 && (
+                            <div className="p-6 text-center text-gray-500 text-sm">暂未加入任何团队</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <table className="w-full">
               <thead className="bg-dark-bg/50">
                 <tr>
@@ -158,6 +303,7 @@ export default function AssetsPage() {
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">资产信息</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">类型</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">状态</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">来源</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">子资产</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">漏洞数</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">重要性</th>
@@ -166,7 +312,7 @@ export default function AssetsPage() {
               </thead>
               <tbody className="divide-y divide-dark-border">
                 {filteredAssets.length === 0 ? (
-                  <tr><td colSpan={8} className="px-6 py-12 text-center text-gray-500">暂无资产数据</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">暂无资产数据</td></tr>
                 ) : filteredAssets.map((asset) => {
                   const typeInfo = typeColors[asset.type] || typeColors.web_app;
                   const TypeIcon = typeInfo.icon;
@@ -206,6 +352,15 @@ export default function AssetsPage() {
                           <span className={`inline-flex items-center space-x-1 ${asset.status === 'online' ? 'text-green-400' : asset.status === 'offline' ? 'text-red-400' : 'text-gray-400'}`}>
                             <span className={`w-2 h-2 rounded-full ${asset.status === 'online' ? 'bg-green-400' : asset.status === 'offline' ? 'bg-red-400' : 'bg-gray-500'}`} />
                             <span className="text-sm">{asset.status === 'online' ? '在线' : asset.status === 'offline' ? '离线' : '未知'}</span>
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                            asset.data_source === 'personal'
+                              ? 'bg-blue-500/20 text-blue-400'
+                              : 'bg-green-500/20 text-green-400'
+                          }`}>
+                            {asset.data_source === 'personal' ? '👤 个人' : `🏢 ${asset.source_name || '团队'}`}
                           </span>
                         </td>
                         <td className="px-6 py-4">

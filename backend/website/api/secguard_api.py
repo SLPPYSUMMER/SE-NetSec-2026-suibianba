@@ -33,7 +33,8 @@ from website.models import (
     AuditLog,
     Project,
     TeamMembership,
-    Issue  # 复用原有 Issue 模型进行关联查询
+    Issue,  # 复用原有 Issue 模型进行关联查询
+    Asset   # 资产模型，用于统计团队资产数量
 )
 from website.models import Organization
 
@@ -128,6 +129,9 @@ class ReportListSchema(BaseModel):
     project_name: Optional[str]
     created_at: datetime
     updated_at: datetime
+    data_source: str = "personal"
+    source_name: str = "个人"
+    team_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -343,7 +347,7 @@ def require_team_role(request: HttpRequest, allowed_roles: list):
 
 
 def filter_by_team(queryset, request: HttpRequest):
-    """对 queryset 按用户团队过滤；管理员不过滤；无团队用户只看自己的数据"""
+    """对 queryset 按用户团队过滤；管理员不过滤；有团队用户看团队+个人数据；无团队用户只看自己的数据"""
     if not request.user.is_authenticated:
         return queryset.none()
     if request.user.is_staff:
@@ -358,6 +362,18 @@ def filter_by_team(queryset, request: HttpRequest):
         elif hasattr(model, 'user'):
             return queryset.filter(user=request.user)
         return queryset.none()
+    
+    model = queryset.model
+    
+    from django.db.models import Q
+    
+    if hasattr(model, 'created_by'):
+        return queryset.filter(Q(team=team) | Q(created_by=request.user))
+    elif hasattr(model, 'reporter'):
+        return queryset.filter(Q(team=team) | Q(reporter=request.user))
+    elif hasattr(model, 'user'):
+        return queryset.filter(Q(team=team) | Q(user=request.user))
+    
     return queryset.filter(team=team)
 
 
@@ -738,8 +754,27 @@ def list_reports(
 
     reports = annotate_report_queryset(queryset)[start:end]
 
+    team, _ = get_user_team(request)
+
+    result_items = []
+    for r in reports:
+        item = ReportListSchema.from_orm(r)
+        data_source = "personal"
+        source_name = "个人"
+        if team and r.team_id == team.id:
+            data_source = "team"
+            source_name = team.name
+        elif r.reporter_id != request.user.id:
+            data_source = "team"
+            source_name = team.name if team else "未知团队"
+
+        item.data_source = data_source
+        item.source_name = source_name
+        item.team_id = r.team_id if r.team_id else None
+        result_items.append(item)
+
     return {
-        "items": [ReportListSchema.from_orm(r) for r in reports],
+        "items": result_items,
         "total_count": total_count,
         "page": page,
         "per_page": per_page,
@@ -1151,6 +1186,9 @@ class ScanTaskOut(BaseModel):
     hardware_usage: str = "high"
     selected_modules: str = ""
     timeout_minutes: int = 60
+    data_source: str = "personal"
+    source_name: str = "个人"
+    team_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -1182,8 +1220,19 @@ def list_scans(
     total_count = queryset.count()
     items = queryset.select_related('created_by').order_by('-started_at')[(page - 1) * per_page:page * per_page]
 
+    team, _ = get_user_team(request)
+
     result = []
     for t in items:
+        data_source = "personal"
+        source_name = "个人"
+        if team and t.team_id == team.id:
+            data_source = "team"
+            source_name = team.name
+        elif t.created_by_id != request.user.id:
+            data_source = "team"
+            source_name = team.name if team else "未知团队"
+
         result.append(ScanTaskOut(
             id=t.id,
             scan_id=f"SC-{t.id:04d}",
@@ -1202,6 +1251,9 @@ def list_scans(
             hardware_usage=getattr(t, 'hardware_usage', 'high'),
             selected_modules=getattr(t, 'selected_modules', '') or '',
             timeout_minutes=getattr(t, 'timeout_minutes', 60),
+            data_source=data_source,
+            source_name=source_name,
+            team_id=t.team_id if t.team_id else None,
         ))
 
     return {"items": result, "total_count": total_count, "page": page, "per_page": per_page}
@@ -1590,6 +1642,9 @@ def list_assets(request: HttpRequest):
             "criticality": criticality,
             "last_scan": entry["last_scan"].isoformat() if entry["last_scan"] else None,
             "sub_assets": entry["sub_assets"],
+            "data_source": "team" if team else "personal",
+            "source_name": team.name if team else "个人",
+            "team_id": team.id if team else None,
         })
 
     # 按最后扫描时间倒序
@@ -1889,19 +1944,93 @@ def switch_team(request: HttpRequest):
 
 @router.get("/teams/my-teams")
 def my_teams(request: HttpRequest):
-    """列出当前用户所在的所有团队"""
+    """列出当前用户所在的所有团队（含数据统计，包含待审批）"""
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
+    # 查询所有状态的团队（ACCEPTED + PENDING）
     ms = TeamMembership.objects.filter(
-        user=request.user, status=TeamMembership.Status.ACCEPTED,
+        user=request.user,
+    ).exclude(
+        status=TeamMembership.Status.REJECTED  # 排除已拒绝的
     ).select_related('team')
     active_id = request.user.userprofile.team_id if hasattr(request.user, 'userprofile') else None
-    return {
-        "items": [
-            {"team_id": m.team.id, "team_name": m.team.name, "role": m.role, "role_label": m.get_role_display(), "is_active": m.team_id == active_id}
-            for m in ms
-        ]
-    }
+
+    result = []
+    for m in ms:
+        team = m.team
+        scan_count = ScanTask.objects.filter(team=team).count()
+        vuln_count = Report.objects.filter(team=team).count()
+        asset_count = Asset.objects.filter(team=team).count()
+
+        result.append({
+            "team_id": team.id,
+            "team_name": team.name,
+            "role": m.role,
+            "role_label": m.get_role_display(),
+            "status": m.status,  # 新增：成员状态
+            "status_label": m.get_status_display(),  # 新增：状态显示名
+            "is_active": m.team_id == active_id and m.status == TeamMembership.Status.ACCEPTED,
+            "scan_count": scan_count,
+            "vuln_count": vuln_count,
+            "asset_count": asset_count,
+        })
+
+    return {"items": result}
+
+
+@router.post("/teams/leave")
+def leave_team(request: HttpRequest):
+    """退出当前团队"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    team, membership = require_team(request)
+    
+    if membership.role == TeamMembership.Role.ADMIN:
+        raise HttpError(400, "团队管理员不能直接退出，请先解散团队或转让管理员权限")
+    
+    team_name = team.name
+    membership.delete()
+    
+    profile = request.user.userprofile
+    profile.team = None
+    profile.role = None
+    profile.save()
+    
+    create_audit_log(user=request.user, action='TEAM_LEFT', target_type='Team',
+                     target_id=str(team.id), detail=f"退出了团队 {team_name}", request=request)
+    
+    return {"success": True, "message": f"已成功退出团队 {team_name}"}
+
+
+@router.post("/teams/dissolve")
+def dissolve_team(request: HttpRequest):
+    """解散团队（仅团队管理员）"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    team, membership = require_team_role(request, ["admin"])
+    
+    member_count = TeamMembership.objects.filter(team=team, status=TeamMembership.Status.ACCEPTED).count()
+    
+    if member_count > 1:
+        raise HttpError(400, f"团队中还有 {member_count - 1} 名其他成员，不能解散。请先将成员移出或转让管理员权限")
+    
+    team_name = team.name
+    
+    TeamMembership.objects.filter(team=team).delete()
+    team.delete()
+    
+    profile = request.user.userprofile
+    if profile.team_id == team.id:
+        profile.team = None
+        profile.role = None
+        profile.save()
+    
+    create_audit_log(user=request.user, action='TEAM_DISSOLVED', target_type='Team',
+                     target_id=str(team.id), detail=f"解散了团队 {team_name}", request=request)
+    
+    return {"success": True, "message": f"团队 {team_name} 已成功解散"}
 
 
 @router.get("/teams/pending-invitation")

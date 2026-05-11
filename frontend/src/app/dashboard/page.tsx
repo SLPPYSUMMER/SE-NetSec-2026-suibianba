@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { statsApi, reportApi, SEVERITY_MAP, STATUS_MAP } from '@/services/api';
-import { ShieldCheck, AlertTriangle, CheckCircle, Clock, TrendingUp, ArrowRight, ExternalLink, Plus, Loader2 } from 'lucide-react';
+import { ShieldCheck, AlertTriangle, CheckCircle, Clock, TrendingUp, ArrowRight, ExternalLink, Plus, Loader2, User, Building } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const PIE_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e'];
@@ -106,6 +106,14 @@ export default function DashboardPage() {
                         <span className="text-xs text-gray-500 font-mono">{v.vuln_id}</span>
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${sev(v.severity).bg} text-white`}>{sev(v.severity).label}</span>
                         <span className={`text-xs ${sta(v.status).color}`}>{sta(v.status).label}</span>
+                        {/* 数据来源标签 */}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          v.data_source === 'personal'
+                            ? 'bg-blue-500/20 text-blue-400'
+                            : 'bg-green-500/20 text-green-400'
+                        }`}>
+                          {v.data_source === 'personal' ? '👤 个人' : `🏢 ${v.source_name || '团队'}`}
+                        </span>
                       </div>
                       <h4 className="text-sm font-medium text-white truncate">{v.title}</h4>
                     </div>
