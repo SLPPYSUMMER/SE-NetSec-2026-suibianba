@@ -125,7 +125,15 @@ export const scansApi = {
     const qs = new URLSearchParams(params as Record<string, string>).toString();
     return request<{ items: any[]; total_count: number; page: number; per_page: number }>(`/scans${qs ? `?${qs}` : ''}`);
   },
-  create: (data: { target: string; scanner_type: string }) =>
+  create: (data: {
+    target: string;
+    scanner_type: string;
+    thread_count?: number;
+    parallel_modules?: number;
+    hardware_usage?: string;
+    selected_modules?: string;
+    timeout_minutes?: number;
+  }) =>
     request<any>('/scans', { method: 'POST', body: JSON.stringify(data) }),
 };
 

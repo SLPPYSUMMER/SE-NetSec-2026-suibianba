@@ -23,7 +23,7 @@ from ninja import Query
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
-from django.db.models import Q
+from django.db.models import Q, Count
 
 from website.models import (
     Report,
@@ -343,6 +343,8 @@ def require_team_role(request: HttpRequest, allowed_roles: list):
 
 def filter_by_team(queryset, request: HttpRequest):
     """对 queryset 按用户团队过滤；管理员不过滤；无团队用户只看自己的数据"""
+    if not request.user.is_authenticated:
+        return queryset.none()
     if request.user.is_staff:
         return queryset
     team, _ = get_user_team(request)
@@ -1143,6 +1145,11 @@ class ScanTaskOut(BaseModel):
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     created_at: datetime
+    thread_count: int = 10
+    parallel_modules: int = 5
+    hardware_usage: str = "high"
+    selected_modules: str = ""
+    timeout_minutes: int = 60
 
     class Config:
         from_attributes = True
@@ -1150,8 +1157,13 @@ class ScanTaskOut(BaseModel):
 
 class ScanTaskCreateSchema(BaseModel):
     target: str = Field(..., description="扫描目标URL")
-    scanner_type: str = Field("deep", description="扫描类型: deep/quick")
+    scanner_type: str = Field("deep", description="扫描类型: deep/quick/custom")
     name: Optional[str] = Field(None, description="任务名称（可选，默认自动生成）")
+    thread_count: Optional[int] = Field(None, description="线程数")
+    parallel_modules: Optional[int] = Field(None, description="并行模块数")
+    hardware_usage: Optional[str] = Field(None, description="硬件使用级别: low/normal/high/maximum")
+    selected_modules: Optional[str] = Field(None, description="自定义模块列表，逗号分隔")
+    timeout_minutes: Optional[int] = Field(None, description="超时分钟数")
 
 
 @router.get("/scans")
@@ -1184,6 +1196,11 @@ def list_scans(
             started_at=t.started_at,
             finished_at=t.finished_at,
             created_at=t.started_at,
+            thread_count=getattr(t, 'thread_count', 10),
+            parallel_modules=getattr(t, 'parallel_modules', 5),
+            hardware_usage=getattr(t, 'hardware_usage', 'high'),
+            selected_modules=getattr(t, 'selected_modules', '') or '',
+            timeout_minutes=getattr(t, 'timeout_minutes', 60),
         ))
 
     return {"items": result, "total_count": total_count, "page": page, "per_page": per_page}
@@ -1200,6 +1217,11 @@ def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
         status=ScanTask.Status.PENDING,
         team=set_request_team(request),
         created_by=request.user,
+        thread_count=payload.thread_count if payload.thread_count is not None else 10,
+        parallel_modules=payload.parallel_modules if payload.parallel_modules is not None else 5,
+        hardware_usage=payload.hardware_usage if payload.hardware_usage else "high",
+        selected_modules=payload.selected_modules if payload.selected_modules else "",
+        timeout_minutes=payload.timeout_minutes if payload.timeout_minutes is not None else 60,
     )
 
     try:
@@ -1313,48 +1335,130 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
         }
 
 
-# Asset endpoint
+# Asset endpoint — 合并 Asset 表 + Report 统计
+_TYPE_LABEL_MAP = {
+    "host": "主机", "port": "端口", "service": "服务",
+    "subdomain": "子域名", "web_tech": "Web技术", "ssl_cert": "SSL证书",
+}
+
+
 @router.get("/assets")
 def list_assets(request: HttpRequest):
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
 
+    from website.models import Asset
+
     if request.user.is_staff:
-        scan_targets = ScanTask.objects.values('target').distinct()
-        affected_urls = Report.objects.exclude(affected_url="").values('affected_url').distinct()
+        asset_qs = Asset.objects.all()
+        report_qs = Report.objects.all()
     else:
         team, _ = get_user_team(request)
         if team is None:
             return {"items": [], "total_count": 0}
+        asset_qs = Asset.objects.filter(team=team)
+        report_qs = Report.objects.filter(team=team)
+
+    # 按 target 分组，收集 Report 统计
+    assets_by_target = {}
+    for a in asset_qs.select_related('scan_task').order_by('-discovered_at'):
+        t = a.target
+        if t not in assets_by_target:
+            assets_by_target[t] = {
+                "target": t,
+                "sub_assets": [],
+                "types": set(),
+                "last_scan": a.discovered_at,
+            }
+        entry = assets_by_target[t]
+        entry["sub_assets"].append({
+            "id": a.id,
+            "asset_type": a.asset_type,
+            "asset_type_label": _TYPE_LABEL_MAP.get(a.asset_type, a.asset_type),
+            "name": a.name,
+            "value": a.value,
+            "status": a.status,
+        })
+        entry["types"].add(a.asset_type)
+        if a.discovered_at and (not entry["last_scan"] or a.discovered_at > entry["last_scan"]):
+            entry["last_scan"] = a.discovered_at
+
+    # 扫描目标（无 Asset 记录的扫描目标也展示）
+    if request.user.is_staff:
+        scan_targets = ScanTask.objects.values('target').distinct()
+        affected_urls = Report.objects.exclude(affected_url="").values('affected_url').distinct()
+    else:
         scan_targets = ScanTask.objects.filter(team=team).values('target').distinct()
         affected_urls = Report.objects.filter(team=team).exclude(affected_url="").values('affected_url').distinct()
 
-    urls = set()
-    for t in scan_targets: urls.add(t['target'])
-    for r in affected_urls: urls.add(r['affected_url'])
+    for s in scan_targets:
+        url = s['target']
+        if url and url not in assets_by_target:
+            assets_by_target[url] = {"target": url, "sub_assets": [], "types": set(), "last_scan": None}
+    for r in affected_urls:
+        url = r['affected_url']
+        if url and url not in assets_by_target:
+            assets_by_target[url] = {"target": url, "sub_assets": [], "types": set(), "last_scan": None}
 
-    assets = []
-    for url in urls:
-        if not url: continue
-        if request.user.is_staff:
-            vuln_count = Report.objects.filter(affected_url=url).count()
-            last_scan = ScanTask.objects.filter(target=url).order_by('-started_at').first()
+    # 构建输出
+    items = []
+    for target_url, entry in assets_by_target.items():
+        if not target_url:
+            continue
+
+        # Report 统计
+        vuln_count = report_qs.filter(affected_url=target_url).count()
+        sev_counts = {}
+        if vuln_count > 0:
+            for s in report_qs.filter(affected_url=target_url).values('severity').annotate(
+                cnt=Count('id')
+            ):
+                sev_counts[s['severity']] = s['cnt']
+
+        # 确定主要类型
+        types = entry["types"]
+        if types:
+            type_order = ["host", "subdomain", "port", "service", "web_tech", "ssl_cert"]
+            primary_type = next((t for t in type_order if t in types), list(types)[0])
         else:
-            team, _ = get_user_team(request)
-            vuln_count = Report.objects.filter(affected_url=url, team=team).count() if team else 0
-            last_scan = ScanTask.objects.filter(target=url, team=team).order_by('-started_at').first() if team else None
-        assets.append({
-            "id": abs(hash(url)) % 10000,
-            "name": url,
-            "url": url,
-            "type": "web_app",
-            "status": "online" if last_scan and last_scan.status == "finished" else "unknown",
+            primary_type = "web_app"
+
+        # 状态
+        sub_statuses = [sa["status"] for sa in entry["sub_assets"]]
+        if any(s == "online" for s in sub_statuses):
+            status = "online"
+        elif sub_statuses:
+            status = sub_statuses[0]
+        else:
+            status = "unknown"
+
+        # 重要性
+        high_count = sev_counts.get("high", 0) + sev_counts.get("critical", 0)
+        if high_count >= 3:
+            criticality = "high"
+        elif high_count >= 1 or vuln_count >= 3:
+            criticality = "medium"
+        else:
+            criticality = "low"
+
+        items.append({
+            "id": abs(hash(target_url)) % 100000,
+            "name": target_url,
+            "url": target_url,
+            "type": primary_type,
+            "type_label": _TYPE_LABEL_MAP.get(primary_type, "Web应用"),
+            "status": status,
             "vulnerabilities": vuln_count,
-            "last_scan": last_scan.started_at.isoformat() if last_scan else None,
-            "criticality": "high" if vuln_count >= 5 else "medium" if vuln_count >= 1 else "low",
+            "severity_breakdown": sev_counts,
+            "criticality": criticality,
+            "last_scan": entry["last_scan"].isoformat() if entry["last_scan"] else None,
+            "sub_assets": entry["sub_assets"],
         })
 
-    return {"items": assets, "total_count": len(assets)}
+    # 按最后扫描时间倒序
+    items.sort(key=lambda x: x.get("last_scan") or "", reverse=True)
+
+    return {"items": items, "total_count": len(items)}
 
 
 # ==============================================================================

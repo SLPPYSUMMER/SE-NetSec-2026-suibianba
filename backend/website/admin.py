@@ -12,6 +12,7 @@ from import_export import resources
 from import_export.admin import ImportExportModelAdmin
 
 from website.models import (
+    Asset,
     IP,
     Activity,
     ActivityLog,
@@ -1312,6 +1313,25 @@ class ScanTaskAdmin(admin.ModelAdmin):
     search_fields = ("name", "target", "created_by__username")
     date_hierarchy = "started_at"
     ordering = ("-started_at",)
+
+
+@admin.register(Asset)
+class AssetAdmin(admin.ModelAdmin):
+    """扫描资产管理"""
+    list_display = (
+        "id",
+        "name",
+        "asset_type",
+        "status",
+        "target",
+        "scan_task",
+        "team",
+        "discovered_at",
+    )
+    list_filter = ("asset_type", "status", "discovered_at")
+    search_fields = ("name", "target", "value")
+    date_hierarchy = "discovered_at"
+    ordering = ("-discovered_at",)
 
 
 @admin.register(Vulnerability)

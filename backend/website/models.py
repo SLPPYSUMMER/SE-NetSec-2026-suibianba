@@ -3935,6 +3935,19 @@ class ScanTask(models.Model):
     )
     findings_count = models.IntegerField(default=0, help_text="发现漏洞数量")
 
+    # 扫描参数（前端自定义扫描配置）
+    timeout_minutes = models.IntegerField(default=60, help_text="超时分钟数")
+    thread_count = models.IntegerField(default=10, help_text="每主机线程数 (-t)")
+    parallel_modules = models.IntegerField(default=5, help_text="并行模块数 (-M)")
+    hardware_usage = models.CharField(
+        max_length=20, default="high",
+        choices=[("low", "低"), ("normal", "正常"), ("high", "高"), ("maximum", "最大")],
+        help_text="硬件使用级别"
+    )
+    selected_modules = models.TextField(
+        blank=True, default="", help_text="自定义选择的模块，逗号分隔，空=全部"
+    )
+
     def __str__(self):
         return f"[{self.get_status_display()}] {self.name} -> {self.target}"
 
@@ -3989,6 +4002,69 @@ class Vulnerability(models.Model):
         ]
         verbose_name = "扫描漏洞"
         verbose_name_plural = "扫描漏洞"
+
+
+class Asset(models.Model):
+    """
+    扫描发现的资产 (Asset) —— Nettacker 扫描过程中识别的主机、端口、服务、子域名等。
+    与 ScanTask 关联，支持按团队隔离。
+    """
+
+    class AssetType(models.TextChoices):
+        HOST = "host", "主机"
+        PORT = "port", "端口"
+        SERVICE = "service", "服务"
+        SUBDOMAIN = "subdomain", "子域名"
+        WEB_TECH = "web_tech", "Web技术"
+        SSL_CERT = "ssl_cert", "SSL证书"
+
+    class Status(models.TextChoices):
+        ONLINE = "online", "在线"
+        OFFLINE = "offline", "离线"
+        UNKNOWN = "unknown", "未知"
+
+    scan_task = models.ForeignKey(
+        ScanTask,
+        on_delete=models.CASCADE,
+        related_name="assets",
+        help_text="所属扫描任务",
+    )
+    asset_type = models.CharField(
+        max_length=20,
+        choices=AssetType.choices,
+        help_text="资产类型",
+    )
+    name = models.CharField(max_length=255, help_text="资产标识 (IP/域名/端口/服务名)")
+    value = models.TextField(blank=True, default="", help_text="详细信息 (JSON)")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ONLINE,
+        help_text="在线状态",
+    )
+    target = models.CharField(max_length=255, help_text="所属扫描目标")
+    team = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="secguard_assets",
+        null=True,
+        blank=True,
+        help_text="所属团队（数据隔离）",
+    )
+    discovered_at = models.DateTimeField(auto_now_add=True, help_text="发现时间")
+
+    class Meta:
+        ordering = ["-discovered_at"]
+        indexes = [
+            models.Index(fields=["asset_type"], name="asset_type_idx"),
+            models.Index(fields=["target"], name="asset_target_idx"),
+            models.Index(fields=["scan_task"], name="asset_scan_task_idx"),
+        ]
+        verbose_name = "资产"
+        verbose_name_plural = "资产"
+
+    def __str__(self):
+        return f"[{self.get_asset_type_display()}] {self.name}"
 
 
 class AuditLog(models.Model):
