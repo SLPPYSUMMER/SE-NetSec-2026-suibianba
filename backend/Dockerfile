@@ -1,4 +1,4 @@
-﻿FROM python:3.11.2 AS builder
+FROM python:3.11.2 AS builder
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /blt
@@ -11,6 +11,13 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     libgtk-3-0 libavcodec-dev libavformat-dev libswscale-dev \
     libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
     libpng-dev libjpeg-dev libtiff-dev libwebp-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# weasyprint PDF export dependencies
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && pip install poetry==2.2.1
@@ -47,6 +54,13 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
     libgtk-3-0 libavcodec58 libavformat58 libswscale5 \
     libpng16-16 libjpeg62-turbo libtiff5 libwebp6 && \
+    rm -rf /var/lib/apt/lists/*
+
+# weasyprint PDF export dependencies
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY . /blt

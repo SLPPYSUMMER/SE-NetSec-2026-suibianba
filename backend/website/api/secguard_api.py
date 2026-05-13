@@ -12,6 +12,8 @@ SecGuard API - 基于 Django Ninja 的漏洞管理平台接口
   - website.duplicate_checker: 漏洞去重检测
 """
 
+import json
+
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.security import django_auth
@@ -25,6 +27,7 @@ from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.db.models import Q, Count
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from website.models import (
     Report,
@@ -33,6 +36,8 @@ from website.models import (
     AuditLog,
     Project,
     TeamMembership,
+    Notification,
+    Attachment,
     Issue,  # 复用原有 Issue 模型进行关联查询
     Asset   # 资产模型，用于统计团队资产数量
 )
@@ -93,6 +98,7 @@ class ReportCreateSchema(BaseModel):
     cve_id: Optional[str] = Field(None, description="CVE编号（可选）")
     affected_url: Optional[str] = Field(None, description="受影响的URL")
     reproduction_steps: Optional[str] = Field(None, description="复现步骤")
+    impact_scope: Optional[str] = Field(None, description="影响范围")
     assignee_id: Optional[int] = Field(None, description="指派处理人ID")
 
     @validator('severity')
@@ -132,6 +138,7 @@ class ReportListSchema(BaseModel):
     data_source: str = "personal"
     source_name: str = "个人"
     team_id: Optional[int] = None
+    processing_time: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -146,6 +153,7 @@ class ReportDetailSchema(BaseModel):
     cve_id: Optional[str]
     affected_url: Optional[str]
     reproduction_steps: Optional[str]
+    impact_scope: Optional[str] = None
     reporter: UserSchema
     assignee: Optional[UserSchema]
     project_id: int
@@ -163,12 +171,12 @@ class AssignReportSchema(BaseModel):
 
 
 class StatusTransitionSchema(BaseModel):
-    action: str = Field(..., description="操作类型: submit_fix/confirm_review/close/reopen")
-    comment: Optional[str] = Field(None, description="操作备注/修复说明")
+    action: str = Field(..., description="操作类型: submit_fix/confirm_review/review_fail/close/reopen")
+    comment: Optional[str] = Field(None, description="操作备注/修复说明/不通过原因")
 
     @validator('action')
     def validate_action(cls, v):
-        allowed = ['submit_fix', 'confirm_review', 'close', 'reopen']
+        allowed = ['submit_fix', 'confirm_review', 'review_fail', 'close', 'reopen']
         if v not in allowed:
             raise HttpError(400, f"操作类型必须是: {', '.join(allowed)}")
         return v
@@ -244,6 +252,27 @@ def create_audit_log(user, action: str, target_type: str, target_id: str,
         ip_address=ip_address,
         team=team,
     )
+
+
+def create_notification(user, message: str, notification_type: str = "alert", link: str = ""):
+    """创建站内通知"""
+    Notification.objects.create(
+        user=user,
+        message=message,
+        notification_type=notification_type,
+        link=link,
+    )
+
+
+def notify_team_admins(team, message: str, notification_type: str = "alert", link: str = ""):
+    """通知团队中所有管理员和项目经理"""
+    memberships = TeamMembership.objects.filter(
+        team=team,
+        status=TeamMembership.Status.ACCEPTED,
+        role__in=[TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD],
+    )
+    for m in memberships:
+        create_notification(m.user, message, notification_type, link)
 
 
 def get_user_team_role(request: HttpRequest):
@@ -680,6 +709,7 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         cve_id=payload.cve_id or "",
         affected_url=payload.affected_url or "",
         reproduction_steps=payload.reproduction_steps or "",
+        impact_scope=payload.impact_scope or "",
     )
 
     create_audit_log(
@@ -690,6 +720,23 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         detail=f"创建漏洞报告 [{report.vuln_id}]: {report.title}",
         request=request
     )
+
+    # 自动通知团队管理员/项目经理
+    if report.team:
+        notify_team_admins(
+            report.team,
+            f"新漏洞 {report.vuln_id} 已提交: {report.title}",
+            "alert",
+            f"/vulnerabilities/{report.vuln_id}"
+        )
+    # 如果创建时已分派，通知被分派人
+    if assignee:
+        create_notification(
+            assignee,
+            f"漏洞 {report.vuln_id} 已分派给您: {report.title}",
+            "alert",
+            f"/vulnerabilities/{report.vuln_id}"
+        )
 
     from django.db.models import F
     vuln_id = report.vuln_id
@@ -756,6 +803,7 @@ def list_reports(
 
     team, _ = get_user_team(request)
 
+    now = timezone.now()
     result_items = []
     for r in reports:
         item = ReportListSchema.from_orm(r)
@@ -766,6 +814,15 @@ def list_reports(
         else:
             data_source = "personal"
             source_name = "个人"
+
+        # 计算处理时长
+        delta = now - r.created_at
+        if delta.days > 0:
+            item.processing_time = f"{delta.days}天{delta.seconds // 3600}小时"
+        elif delta.seconds >= 3600:
+            item.processing_time = f"{delta.seconds // 3600}小时{(delta.seconds % 3600) // 60}分"
+        else:
+            item.processing_time = f"{delta.seconds // 60}分钟"
 
         item.data_source = data_source
         item.source_name = source_name
@@ -909,6 +966,14 @@ def assign_report(request: HttpRequest, vuln_id: str, payload: AssignReportSchem
         request=request
     )
 
+    # 通知被分派人
+    create_notification(
+        assignee,
+        f"漏洞 {vuln_id} 已分派给您: {report.title}",
+        "alert",
+        f"/vulnerabilities/{vuln_id}"
+    )
+
     return annotate_report(report)
 
 
@@ -922,6 +987,7 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
     │ PENDING ──(assign)──→ PROCESSING                             │
     │ PROCESSING ──(submit_fix)──→ FIXED                          │
     │ FIXED ──(confirm_review)──→ REVIEWING                       │
+    │ FIXED ──(review_fail)──→ PROCESSING                         │
     │ REVIEWING ──(close)──→ CLOSED                               │
     │ CLOSED/FIXED/REVIEWING ──(reopen)──→ PROCESSING             │
     └─────────────────────────────────────────────────────────────┘
@@ -929,8 +995,9 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
     权限矩阵：
       submit_fix     → 仅处理人(assignee)
       confirm_review → 上报人(reporter) 或 管理员(admin)
+      review_fail    → 上报人(reporter) 或 管理员(admin) — 复核不通过
       close          → 项目经理(manager) 或 管理员(admin)
-      reopen         → 项目经理(manager) 或 管理员(admin)
+      reopen         → 项目经理(manager) 或 管理员(admin) — 需填写重开原因
     """
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
@@ -955,6 +1022,13 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
             'action_name': '确认复核通过',
             'description': '安全测试人员验证修复有效'
         },
+        'review_fail': {
+            'from_status': [Report.Status.FIXED],
+            'to_status': Report.Status.PROCESSING,
+            'allowed_roles': ['reporter', 'admin'],
+            'action_name': '复核不通过',
+            'description': '复核发现修复无效，退回重新处理'
+        },
         'close': {
             'from_status': [Report.Status.REVIEWING],
             'to_status': Report.Status.CLOSED,
@@ -967,7 +1041,8 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
             'to_status': Report.Status.PROCESSING,
             'allowed_roles': ['manager', 'admin'],
             'action_name': '重新打开',
-            'description': '重新激活漏洞进行再次处理'
+            'description': '重新激活漏洞进行再次处理',
+            'require_comment': True
         }
     }
 
@@ -997,7 +1072,7 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
             is_allowed = False
         else:
             is_allowed = report.assignee == request.user
-    elif payload.action == 'confirm_review':
+    elif payload.action in ('confirm_review', 'review_fail'):
         if has_team and team_role in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
             is_allowed = True
         elif has_team and team_role == TeamMembership.Role.DEVELOPER:
@@ -1014,6 +1089,9 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
 
     if not is_allowed:
         raise HttpError(400, f"您没有权限执行 '{action_config['action_name']}' 操作")
+
+    if action_config.get('require_comment') and not payload.comment:
+        raise HttpError(400, f"执行 '{action_config['action_name']}' 操作时必须填写原因说明")
 
     old_status = report.get_status_display()
     report.status = action_config['to_status']
@@ -1032,6 +1110,60 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
         detail=comment,
         request=request
     )
+
+    # 自动通知相关用户
+    vuln_link = f"/vulnerabilities/{vuln_id}"
+    if payload.action == 'submit_fix':
+        create_notification(
+            report.reporter,
+            f"漏洞 {vuln_id} 已标记为已修复: {report.title}",
+            "alert", vuln_link
+        )
+    elif payload.action == 'confirm_review':
+        create_notification(
+            report.reporter,
+            f"漏洞 {vuln_id} 复核通过: {report.title}",
+            "alert", vuln_link
+        )
+        if report.assignee:
+            create_notification(
+                report.assignee,
+                f"漏洞 {vuln_id} 复核通过: {report.title}",
+                "alert", vuln_link
+            )
+    elif payload.action == 'review_fail':
+        if report.assignee:
+            create_notification(
+                report.assignee,
+                f"漏洞 {vuln_id} 复核不通过，需重新修复: {payload.comment or report.title}",
+                "alert", vuln_link
+            )
+    elif payload.action == 'close':
+        if report.reporter:
+            create_notification(
+                report.reporter,
+                f"漏洞 {vuln_id} 已关闭: {report.title}",
+                "alert", vuln_link
+            )
+        if report.assignee:
+            create_notification(
+                report.assignee,
+                f"漏洞 {vuln_id} 已关闭: {report.title}",
+                "alert", vuln_link
+            )
+    elif payload.action == 'reopen':
+        if report.reporter:
+            create_notification(
+                report.reporter,
+                f"漏洞 {vuln_id} 已重新打开: {payload.comment or report.title}",
+                "alert", vuln_link
+            )
+        if report.assignee:
+            create_notification(
+                report.assignee,
+                f"漏洞 {vuln_id} 已重新打开，请重新处理: {payload.comment or ''}",
+                "alert", vuln_link
+            )
 
     return annotate_report(report)
 
@@ -1116,6 +1248,158 @@ def list_audit_logs(
 
 
 # ==============================================================================
+# 附件管理接口 (Attachment APIs) — 文件上传/下载/删除
+# ==============================================================================
+
+ALLOWED_ATTACHMENT_EXTENSIONS = {
+    "jpg", "jpeg", "png", "gif", "pdf",
+    "zip", "tar", "gz", "doc", "docx",
+    "txt", "py", "js", "sh",
+}
+
+MAGIC_BYTES = {
+    "jpg": b"\xff\xd8\xff",
+    "jpeg": b"\xff\xd8\xff",
+    "png": b"\x89PNG",
+    "gif": b"GIF8",
+    "pdf": b"%PDF",
+    "zip": b"PK\x03\x04",
+    "gz": b"\x1f\x8b",
+}
+
+
+def validate_attachment(file) -> str:
+    """验证上传文件的类型和大小，返回错误消息或空字符串"""
+    ext = file.name.rsplit(".", 1)[-1].lower() if "." in file.name else ""
+    if ext not in ALLOWED_ATTACHMENT_EXTENSIONS:
+        return f"不支持的文件类型: .{ext}。允许: {', '.join(sorted(ALLOWED_ATTACHMENT_EXTENSIONS))}"
+    if file.size > 50 * 1024 * 1024:
+        return "文件大小超过 50MB 限制"
+    if ext in MAGIC_BYTES:
+        file.seek(0)
+        header = file.read(4)
+        file.seek(0)
+        if not header.startswith(MAGIC_BYTES[ext]):
+            return f"文件内容与扩展名 .{ext} 不匹配"
+    return ""
+
+
+class AttachmentSchema(BaseModel):
+    id: int
+    filename: str
+    size: int
+    mime_type: Optional[str] = ""
+    uploaded_at: datetime
+    uploader_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+@router.post("/reports/{vuln_id}/attachments")
+def upload_attachment(request: HttpRequest, vuln_id: str):
+    """上传附件到指定漏洞报告"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    try:
+        report = Report.objects.get(vuln_id=vuln_id)
+    except Report.DoesNotExist:
+        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
+
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        raise HttpError(400, "请选择要上传的文件")
+
+    err = validate_attachment(uploaded)
+    if err:
+        raise HttpError(400, err)
+
+    attachment = Attachment.objects.create(
+        report=report,
+        uploader=request.user,
+        file=uploaded,
+        filename=uploaded.name,
+        size=uploaded.size,
+        mime_type=uploaded.content_type or "",
+    )
+
+    create_audit_log(
+        user=request.user,
+        action='UPLOAD_ATTACHMENT',
+        target_type='Report',
+        target_id=vuln_id,
+        detail=f"上传附件: {uploaded.name} ({uploaded.size} bytes)",
+        request=request,
+    )
+
+    return {
+        "id": attachment.id,
+        "filename": attachment.filename,
+        "size": attachment.size,
+        "mime_type": attachment.mime_type,
+        "uploaded_at": attachment.uploaded_at,
+        "uploader_name": request.user.username,
+    }
+
+
+@router.get("/reports/{vuln_id}/attachments", response=List[AttachmentSchema])
+def list_attachments(request: HttpRequest, vuln_id: str):
+    """获取漏洞报告的附件列表"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    try:
+        report = Report.objects.get(vuln_id=vuln_id)
+    except Report.DoesNotExist:
+        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
+
+    attachments = Attachment.objects.filter(report=report).select_related('uploader')
+    return [
+        AttachmentSchema(
+            id=a.id,
+            filename=a.filename,
+            size=a.size,
+            mime_type=a.mime_type,
+            uploaded_at=a.uploaded_at,
+            uploader_name=a.uploader.username if a.uploader else None,
+        )
+        for a in attachments
+    ]
+
+
+@router.get("/attachments/{attachment_id}/download")
+def download_attachment(request: HttpRequest, attachment_id: int):
+    """下载附件"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    attachment = get_object_or_404(Attachment, id=attachment_id)
+
+    from django.http import FileResponse
+    response = FileResponse(attachment.file, content_type=attachment.mime_type or 'application/octet-stream')
+    response['Content-Disposition'] = f'attachment; filename="{attachment.filename}"'
+    return response
+
+
+@router.delete("/attachments/{attachment_id}")
+def delete_attachment(request: HttpRequest, attachment_id: int):
+    """删除附件"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    attachment = get_object_or_404(Attachment, id=attachment_id)
+
+    if not (request.user.is_staff or attachment.uploader == request.user):
+        raise HttpError(403, "无权删除此附件")
+
+    attachment.file.delete(save=False)
+    attachment.delete()
+
+    return {"success": True, "message": "附件已删除"}
+
+
+# ==============================================================================
 # 统计数据接口 (Statistics APIs) - Dashboard 数据源
 # ==============================================================================
 
@@ -1136,6 +1420,32 @@ def api_statistics_overview(request: HttpRequest):
 
     recent_reports = qs.select_related('reporter', 'assignee').order_by('-created_at')[:5]
 
+    # 修复率
+    fix_rate = round((fixed_count + closed_count) / total_reports * 100, 1) if total_reports > 0 else 0.0
+
+    # 月度趋势（最近6个月）
+    from django.db.models.functions import TruncMonth
+    from datetime import timedelta
+    six_months_ago = timezone.now() - timedelta(days=180)
+    monthly_data = (
+        qs.filter(created_at__gte=six_months_ago)
+        .annotate(month=TruncMonth('created_at'))
+        .values('month', 'status')
+        .annotate(count=Count('vuln_id'))
+        .order_by('month')
+    )
+    monthly_trend: List[Dict] = []
+    for item in monthly_data:
+        month_str = item['month'].strftime('%Y-%m') if item['month'] else ''
+        existing = next((m for m in monthly_trend if m['month'] == month_str), None)
+        if existing:
+            existing[item['status']] = item['count']
+        else:
+            monthly_trend.append({
+                'month': month_str,
+                item['status']: item['count'],
+            })
+
     return {
         'total_reports': total_reports,
         'status_distribution': list(status_stats),
@@ -1143,6 +1453,8 @@ def api_statistics_overview(request: HttpRequest):
         'pending_count': pending_count,
         'processing_count': processing_count,
         'fixed_count': fixed_count,
+        'fix_rate': fix_rate,
+        'monthly_trend': monthly_trend,
         'recent_reports': [
             {'vuln_id': r.vuln_id, 'title': r.title, 'status': r.status, 'severity': r.severity, 'created_at': r.created_at.isoformat()}
             for r in recent_reports
@@ -1307,6 +1619,15 @@ def create_scan(request: HttpRequest, payload: ScanTaskCreateSchema):
         timeout_minutes=payload.timeout_minutes if payload.timeout_minutes is not None else 60,
     )
 
+    create_audit_log(
+        user=request.user,
+        action='SCAN_CREATED',
+        target_type='ScanTask',
+        target_id=str(task.id),
+        detail=f"创建扫描任务: {task.name} (目标: {payload.target})",
+        request=request
+    )
+
     try:
         from website.scanner import launch_scan_async
         launch_scan_async(task)
@@ -1368,11 +1689,20 @@ def batch_delete_scans(request: HttpRequest, payload: BatchDeleteSchema):
     deletable = queryset.exclude(status=ScanTask.Status.RUNNING)
     
     count, _ = deletable.delete()
-    
+
+    create_audit_log(
+        user=request.user,
+        action='BATCH_SCANS_DELETED',
+        target_type='ScanTask',
+        target_id=','.join(str(sid) for sid in payload.scan_ids),
+        detail=f"批量删除 {count} 个扫描任务",
+        request=request
+    )
+
     message = f"成功删除 {count} 个任务"
     if running_count > 0:
         message += f"，跳过 {running_count} 个运行中的任务"
-    
+
     return {
         "success": True,
         "deleted": count,
@@ -1398,8 +1728,18 @@ def delete_scan(request: HttpRequest, scan_id: int):
         raise HttpError(400, "运行中的任务无法删除，请先取消")
     
     task_name = task.name
+    task_id = task.id
     task.delete()
-    
+
+    create_audit_log(
+        user=request.user,
+        action='SCAN_DELETED',
+        target_type='ScanTask',
+        target_id=str(task_id),
+        detail=f"删除扫描任务: {task_name}",
+        request=request
+    )
+
     return {"success": True, "message": f"任务 '{task_name}' 已删除"}
 
 
@@ -1480,10 +1820,172 @@ def retry_scan(request: HttpRequest, scan_id: int):
         }
 
 
+# ==================== 扫描结果手动导入与去重 ====================
+
+def _map_nettacker_severity(sev_str: str) -> str:
+    """将 Nettacker 严重等级映射到 SecGuard 等级"""
+    sev = str(sev_str).lower()
+    if sev in ("critical", "critical"):
+        return "critical"
+    if sev in ("high", "high"):
+        return "high"
+    if sev in ("medium", "medium"):
+        return "medium"
+    return "low"
+
+
+def check_cve_duplicate(cve_id: str) -> Optional[Report]:
+    """基于 CVE ID 精确匹配去重"""
+    if not cve_id or not cve_id.strip():
+        return None
+    return Report.objects.filter(cve_id__iexact=cve_id.strip()).first()
+
+
+def check_url_title_duplicate(url: str, title: str) -> Optional[Report]:
+    """CVE 为空时使用 URL+标题 组合辅助去重"""
+    if not url and not title:
+        return None
+    q = Q()
+    if url:
+        q |= Q(affected_url__icontains=url)
+    if title:
+        q |= Q(title__icontains=title)
+    if not q:
+        return None
+    return Report.objects.filter(q).first()
+
+
+@router.post("/scans/import")
+def import_scan_results(request: HttpRequest):
+    """
+    手动导入 Nettacker JSON 扫描结果
+
+    接收 multipart/form-data，字段名 `file`（JSON 文件）。
+    自动进行 CVE 去重和 URL+标题辅助去重，返回导入统计。
+    """
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        raise HttpError(400, "请上传 JSON 文件")
+
+    if not uploaded.name.lower().endswith(".json"):
+        raise HttpError(400, "仅支持 JSON 格式文件")
+
+    try:
+        raw = uploaded.read().decode("utf-8")
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise HttpError(400, f"JSON 解析失败: {str(e)}")
+
+    entries = data if isinstance(data, list) else data.get("results", data.get("events", []))
+    if not isinstance(entries, list):
+        raise HttpError(400, "JSON 格式不正确：需要顶层数组或包含 results/events 字段")
+
+    default_project = Project.objects.first()
+    if not default_project:
+        raise HttpError(400, "系统中没有项目，请先创建项目")
+
+    team = set_request_team(request)
+    imported = 0
+    skipped_duplicate = 0
+    errors = 0
+    details: List[str] = []
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            errors += 1
+            continue
+
+        title = str(entry.get("event") or entry.get("module_name") or entry.get("title") or "Nettacker 发现")[:255]
+        severity = _map_nettacker_severity(entry.get("severity", "medium"))
+        cve_id = str(entry.get("cve_id", "")).strip()
+        target_url = str(entry.get("target", "")).strip()
+
+        # 组装描述
+        desc_parts = []
+        if entry.get("module_name"):
+            desc_parts.append(f"模块: {entry.get('module_name')}")
+        if target_url:
+            desc_parts.append(f"目标: {target_url}")
+        if entry.get("port"):
+            desc_parts.append(f"端口: {entry.get('port')}")
+        if entry.get("description"):
+            desc_parts.append(str(entry.get("description"))[:2000])
+        description = "\n".join(desc_parts) if desc_parts else "Nettacker 扫描发现"
+
+        # --- 去重检测 ---
+        if cve_id:
+            dup = check_cve_duplicate(cve_id)
+            if dup:
+                skipped_duplicate += 1
+                details.append(f"跳过重复(CVE): {cve_id} → {dup.vuln_id}")
+                create_audit_log(
+                    user=request.user,
+                    action='IMPORT_DUPLICATE_SKIPPED',
+                    target_type='Report',
+                    target_id=dup.vuln_id,
+                    detail=f"导入时CVE去重跳过: CVE={cve_id}, 目标={target_url}",
+                    request=request
+                )
+                continue
+        elif target_url and title:
+            dup = check_url_title_duplicate(target_url, title)
+            if dup:
+                skipped_duplicate += 1
+                details.append(f"跳过重复(URL+标题): {target_url} / {title[:50]} → {dup.vuln_id}")
+                create_audit_log(
+                    user=request.user,
+                    action='IMPORT_DUPLICATE_SKIPPED',
+                    target_type='Report',
+                    target_id=dup.vuln_id,
+                    detail=f"导入时URL+标题去重跳过: URL={target_url}, 标题={title[:80]}",
+                    request=request
+                )
+                continue
+
+        try:
+            report = Report.objects.create(
+                title=title,
+                description=description,
+                severity=severity,
+                status=Report.Status.PENDING,
+                reporter=request.user,
+                project=default_project,
+                team=team,
+                cve_id=cve_id,
+                affected_url=target_url,
+            )
+            imported += 1
+            create_audit_log(
+                user=request.user,
+                action='IMPORT_CREATED',
+                target_type='Report',
+                target_id=report.vuln_id,
+                detail=f"导入扫描结果创建漏洞: {report.vuln_id} (CVE={cve_id or 'N/A'})",
+                request=request
+            )
+        except Exception as e:
+            errors += 1
+            details.append(f"创建失败: {title[:50]} - {str(e)}")
+
+    return {
+        "success": True,
+        "imported": imported,
+        "skipped_duplicate": skipped_duplicate,
+        "errors": errors,
+        "total": len(entries),
+        "details": details,
+    }
+
+
 class ExportSchema(BaseModel):
     format: str = Field("pdf", description="导出格式: pdf/html")
     project_id: Optional[int] = Field(None, description="项目筛选")
     status: Optional[str] = Field(None, description="状态筛选")
+    date_from: Optional[str] = Field(None, description="开始日期 (YYYY-MM-DD)")
+    date_to: Optional[str] = Field(None, description="结束日期 (YYYY-MM-DD)")
 
 
 @router.post("/reports-export", auth=None)
@@ -1497,6 +1999,10 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
         queryset = queryset.filter(project_id=payload.project_id)
     if payload.status:
         queryset = queryset.filter(status=payload.status)
+    if payload.date_from:
+        queryset = queryset.filter(created_at__gte=payload.date_from)
+    if payload.date_to:
+        queryset = queryset.filter(created_at__lte=payload.date_to + " 23:59:59")
 
     reports = queryset.select_related('reporter', 'assignee', 'project').order_by('-created_at')
 
@@ -1554,10 +2060,16 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
         resp["Content-Disposition"] = f'attachment; filename="secguard-report-html-{datetime.now().strftime("%Y%m%d")}.html"'
         return resp
     elif payload.format == "pdf":
-        pdf_html = html.replace('<h1>', '<h1><small style="color:#94a3b8;">[PDF 报告 — 请使用 Ctrl+P 打印为 PDF]</small> ')
-        resp = HttpResponse(pdf_html, content_type="text/html; charset=utf-8")
-        resp["Content-Disposition"] = f'attachment; filename="secguard-report-pdf-{datetime.now().strftime("%Y%m%d")}.html"'
-        return resp
+        try:
+            import weasyprint
+            pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+            resp = HttpResponse(pdf_bytes, content_type="application/pdf")
+            resp["Content-Disposition"] = f'attachment; filename="secguard-report-pdf-{datetime.now().strftime("%Y%m%d")}.pdf"'
+            return resp
+        except ImportError:
+            resp = HttpResponse(html, content_type="text/html; charset=utf-8")
+            resp["Content-Disposition"] = f'attachment; filename="secguard-report-html-{datetime.now().strftime("%Y%m%d")}.html"'
+            return resp
     else:
         items = []
         for r in reports:
@@ -1588,6 +2100,7 @@ def list_assets(request: HttpRequest):
 
     from website.models import Asset
 
+    team = None
     if request.user.is_staff:
         asset_qs = Asset.objects.all()
         report_qs = Report.objects.all()
@@ -2295,6 +2808,99 @@ def check_pending_invitation(request: HttpRequest):
     if not m:
         return {"has_pending": False}
     return {"has_pending": True, "team_id": m.team.id, "team_name": m.team.name}
+
+
+# ==================== 通知系统 ====================
+
+class NotificationItemSchema(BaseModel):
+    id: int
+    message: str
+    notification_type: str
+    is_read: bool
+    link: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationListSchema(BaseModel):
+    items: List[NotificationItemSchema]
+    total_count: int
+    unread_count: int
+
+
+@router.get("/notifications", response=NotificationListSchema)
+def list_notifications(request: HttpRequest,
+                       page: int = Query(1, ge=1),
+                       per_page: int = Query(20, ge=1, le=100),
+                       unread_only: bool = Query(False)):
+    """获取当前用户的通知列表"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    qs = Notification.objects.filter(
+        user=request.user,
+        is_deleted=False,
+    )
+    if unread_only:
+        qs = qs.filter(is_read=False)
+
+    total_count = qs.count()
+    unread_count = Notification.objects.filter(
+        user=request.user,
+        is_deleted=False,
+        is_read=False,
+    ).count()
+
+    offset = (page - 1) * per_page
+    items = list(qs[offset:offset + per_page])
+
+    return NotificationListSchema(
+        items=items,
+        total_count=total_count,
+        unread_count=unread_count,
+    )
+
+
+@router.post("/notifications/{notification_id}/read")
+def mark_notification_read(request: HttpRequest, notification_id: int):
+    """标记单条通知为已读"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    notif = get_object_or_404(Notification, id=notification_id, user=request.user)
+    notif.is_read = True
+    notif.save()
+    return {"success": True}
+
+
+@router.post("/notifications/read-all")
+def mark_all_notifications_read(request: HttpRequest):
+    """标记所有通知为已读"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    updated = Notification.objects.filter(
+        user=request.user,
+        is_deleted=False,
+        is_read=False,
+    ).update(is_read=True)
+    return {"success": True, "updated": updated}
+
+
+@router.get("/notifications/unread-count")
+def unread_notification_count(request: HttpRequest):
+    """获取未读通知数量"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    count = Notification.objects.filter(
+        user=request.user,
+        is_deleted=False,
+        is_read=False,
+    ).count()
+    return {"unread_count": count}
 
 
 # Admin: list all teams with members

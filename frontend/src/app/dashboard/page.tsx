@@ -37,6 +37,7 @@ export default function DashboardPage() {
     { title: '待处理', value: stats?.pending_count ?? '--', icon: AlertTriangle, color: 'text-red-400', bgColor: 'bg-red-500/10' },
     { title: '已修复', value: stats?.fixed_count ?? '--', icon: CheckCircle, color: 'text-green-400', bgColor: 'bg-green-500/10' },
     { title: '处理中', value: stats?.processing_count ?? '--', icon: Clock, color: 'text-yellow-400', bgColor: 'bg-yellow-500/10' },
+    { title: '修复率', value: stats?.fix_rate != null ? `${stats.fix_rate}%` : '--', icon: CheckCircle, color: 'text-blue-400', bgColor: 'bg-blue-500/10' },
   ];
 
   const severityMap: Record<string, number> = {};
@@ -55,7 +56,7 @@ export default function DashboardPage() {
       <div className="ml-64">
         <Header title="安全概览" />
         <main className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
             {statCards.map((s, i) => (
               <div key={i} className="bg-dark-card border border-dark-border rounded-xl p-6 hover:border-primary/50 transition-all">
                 <div className="flex items-start justify-between mb-4">
@@ -123,6 +124,28 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+
+          {stats?.monthly_trend && stats.monthly_trend.length > 0 && (
+            <div className="bg-dark-card border border-dark-border rounded-xl p-6">
+              <h3 className="text-lg font-semibold text-white mb-6">修复趋势（近6个月）</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={stats.monthly_trend.map((m: any) => ({
+                  month: m.month,
+                  新增: m.pending || 0,
+                  已修复: (m.fixed || 0) + (m.closed || 0),
+                  处理中: m.processing || 0,
+                }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
+                  <YAxis stroke="#94a3b8" fontSize={12} />
+                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                  <Area type="monotone" dataKey="新增" stroke="#0ea5e9" fill="#0ea5e9" fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="已修复" stroke="#22c55e" fill="#22c55e" fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="处理中" stroke="#eab308" fill="#eab308" fillOpacity={0.2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </main>
       </div>
     </div>

@@ -23,6 +23,8 @@ export default function VulnerabilitiesPage() {
   const [showTeamDropdown, setShowTeamDropdown] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());  // 选中的漏洞ID
   const [batchDeleting, setBatchDeleting] = useState(false);  // 批量删除状态
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('desc');
   const perPage = 20;
 
   const fetchReports = async () => {
@@ -33,6 +35,7 @@ export default function VulnerabilitiesPage() {
       if (severityFilter !== 'all') params.severity = severityFilter;
       if (statusFilter !== 'all') params.status = statusFilter;
       if (searchTerm) params.search = searchTerm;
+      if (sortBy) { params.sort_by = sortBy; params.order = sortOrder; }
       const data = await reportApi.list(params);
       setReports(Array.isArray(data.items) ? data.items : []);
       setTotal(data.total_count || 0);
@@ -43,7 +46,7 @@ export default function VulnerabilitiesPage() {
     }
   };
 
-  useEffect(() => { fetchReports(); }, [page, severityFilter, statusFilter]);
+  useEffect(() => { fetchReports(); }, [page, severityFilter, statusFilter, sortBy, sortOrder]);
 
   // 加载用户的团队列表
   useEffect(() => {
@@ -169,6 +172,12 @@ export default function VulnerabilitiesPage() {
                 <option value="pending">待分派</option><option value="processing">处理中</option>
                 <option value="fixed">已修复</option><option value="reviewing">已复核</option>
                 <option value="closed">已关闭</option>
+              </select>
+              <select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(1); }}
+                className="px-4 py-2.5 bg-dark-card border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary cursor-pointer">
+                <option value="created_at">按创建时间排序</option>
+                <option value="severity">按严重程度排序</option>
+                <option value="status">按状态排序</option>
               </select>
             </div>
             <div className="flex items-center space-x-2">
@@ -302,15 +311,16 @@ export default function VulnerabilitiesPage() {
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">状态</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">来源</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">负责人</th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">处理时长</th>
                   <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">上报日期</th>
                   <th className="text-right px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-dark-border">
                 {loading ? (
-                  <tr><td colSpan={9} className="px-6 py-12 text-center"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></td></tr>
+                  <tr><td colSpan={10} className="px-6 py-12 text-center"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></td></tr>
                 ) : filteredReports.length === 0 ? (
-                  <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">暂无漏洞数据</td></tr>
+                  <tr><td colSpan={10} className="px-6 py-12 text-center text-gray-500">暂无漏洞数据</td></tr>
                 ) : filteredReports.map((r) => (
                   <tr key={r.vuln_id} className="hover:bg-dark-hover transition-colors group">
                     <td className="px-6 py-4">
@@ -347,6 +357,9 @@ export default function VulnerabilitiesPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-gray-300">{r.assignee_username || '未分派'}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="text-sm text-gray-400">{r.processing_time || '—'}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-gray-400">{r.created_at?.substring(0, 10)}</span>

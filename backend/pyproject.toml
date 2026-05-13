@@ -75,6 +75,7 @@ google-genai = "^1.67.0"
 pyjwt = {extras = ["crypto"], version = "^2.12.1"}
 tblib = "^3.2.2"
 opencv-python-headless = "^4.13.0.92"
+weasyprint = "^63.0"
 
 
 [tool.poetry.group.dev.dependencies]

@@ -3844,6 +3844,7 @@ class Report(models.Model):
     cve_id = models.CharField(max_length=50, blank=True, default="", help_text="CVE编号")
     affected_url = models.URLField(max_length=500, blank=True, default="", help_text="受影响URL")
     reproduction_steps = models.TextField(blank=True, default="", help_text="复现步骤")
+    impact_scope = models.TextField(blank=True, default="", help_text="影响范围")
 
     # ---- 时间戳 ----
     created_at = models.DateTimeField(auto_now_add=True, help_text="上报时间")
@@ -3851,12 +3852,13 @@ class Report(models.Model):
 
     def save(self, *args, **kwargs):
         """
-        自动生成漏洞编号：SEC-<年份>-<四位序号>
-        例如：SEC-2026-0001, SEC-2026-0002, ...
+        自动生成漏洞编号：VUL-<年份><月份><日期>-<四位序号>
+        例如：VUL-20260419-0001, VUL-20260419-0002, ...
         """
         if not self.vuln_id:
-            year = timezone.now().year
-            prefix = f"SEC-{year}-"
+            now = timezone.now()
+            date_part = now.strftime("%Y%m%d")
+            prefix = f"VUL-{date_part}-"
             last = (
                 Report.objects.filter(vuln_id__startswith=prefix)
                 .order_by("-vuln_id")
@@ -3882,6 +3884,42 @@ class Report(models.Model):
         ]
         verbose_name = "漏洞报告"
         verbose_name_plural = "漏洞报告"
+
+
+class Attachment(models.Model):
+    """附件 —— 漏洞报告的文件附件"""
+    ALLOWED_EXTENSIONS = (
+        "jpg", "jpeg", "png", "gif", "pdf",
+        "zip", "tar", "gz", "doc", "docx",
+        "txt", "py", "js", "sh",
+    )
+    MAX_SIZE = 50 * 1024 * 1024  # 50MB
+
+    report = models.ForeignKey(
+        Report,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+        help_text="关联的漏洞报告",
+    )
+    uploader = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="uploaded_attachments",
+        help_text="上传者",
+    )
+    file = models.FileField(upload_to="attachments/%Y/%m/", help_text="存储路径")
+    filename = models.CharField(max_length=255, help_text="原始文件名")
+    size = models.PositiveIntegerField(help_text="文件大小（字节）")
+    mime_type = models.CharField(max_length=100, blank=True, help_text="MIME 类型")
+    uploaded_at = models.DateTimeField(auto_now_add=True, help_text="上传时间")
+
+    def __str__(self):
+        return f"[{self.report.vuln_id}] {self.filename}"
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        verbose_name = "附件"
+        verbose_name_plural = "附件"
 
 
 class ScanTask(models.Model):
@@ -4133,10 +4171,10 @@ class TeamMembership(models.Model):
     """
 
     class Role(models.TextChoices):
-        ADMIN = "admin", "团队管理员"
-        TEAM_LEAD = "team_lead", "安全负责人"
+        ADMIN = "admin", "管理员"
+        TEAM_LEAD = "team_lead", "项目经理"
         DEVELOPER = "developer", "开发人员"
-        OBSERVER = "observer", "观察者"
+        OBSERVER = "observer", "安全测试员"
 
     class Status(models.TextChoices):
         PENDING = "pending", "待审核"

@@ -202,3 +202,29 @@ export const teamsApi = {
   dissolve: () =>
     request<any>('/teams/dissolve', { method: 'POST' }),
 };
+
+export const attachmentApi = {
+  list: (vulnId: string) => request<any[]>(`/reports/${vulnId}/attachments`),
+  upload: async (vulnId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`/api/reports/${vulnId}/attachments`, { method: 'POST', body: formData });
+    return res.json();
+  },
+  downloadUrl: (attachmentId: number) => `/api/attachments/${attachmentId}/download`,
+  delete: (attachmentId: number) =>
+    request<{ success: boolean }>(`/attachments/${attachmentId}`, { method: 'DELETE' }),
+};
+
+export const notificationApi = {
+  list: (params?: Record<string, string>) =>
+    request<{ items: any[]; total_count: number; unread_count: number }>(
+      `/notifications?${new URLSearchParams(params || {})}`
+    ),
+  markRead: (id: number) =>
+    request<{ success: boolean }>(`/notifications/${id}/read`, { method: 'POST' }),
+  markAllRead: () =>
+    request<{ success: boolean }>('/notifications/read-all', { method: 'POST' }),
+  unreadCount: () =>
+    request<{ unread_count: number }>('/notifications/unread-count'),
+};

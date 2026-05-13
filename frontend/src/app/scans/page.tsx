@@ -28,6 +28,8 @@ export default function ScansPage() {
   const [hardwareUsage, setHardwareUsage] = useState('high');
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["端口扫描", "子域名", "Web发现", "SSL/TLS"]));
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [timeoutMinutes, setTimeoutMinutes] = useState(60);
   const [timeoutInputValue, setTimeoutInputValue] = useState('60');
   const [scans, setScans] = useState<any[]>([]);
@@ -347,9 +349,41 @@ export default function ScansPage() {
               <h1 className="text-3xl font-bold text-white">自动化扫描管理</h1>
               <p className="text-sm text-gray-400 mt-1">实时控制集群扫描任务与资源分配</p>
             </div>
-            <button className="px-4 py-2.5 bg-dark-card border border-primary/50 text-primary rounded-lg hover:bg-primary/10 transition-all flex items-center space-x-2 text-sm font-medium">
-              <Upload className="w-4 h-4" /><span>导入外部结果</span>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="px-4 py-2.5 bg-dark-card border border-primary/50 text-primary rounded-lg hover:bg-primary/10 transition-all flex items-center space-x-2 text-sm font-medium disabled:opacity-50">
+              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              <span>{importing ? '导入中...' : '导入外部结果'}</span>
             </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setImporting(true);
+                try {
+                  const formData = new FormData();
+                  formData.append('file', file);
+                  const res = await fetch('/api/scans/import', { method: 'POST', body: formData });
+                  const data = await res.json();
+                  if (data.success) {
+                    alert(`导入完成！成功: ${data.imported}, 跳过重复: ${data.skipped_duplicate}, 错误: ${data.errors}`);
+                    fetchScans();
+                  } else {
+                    alert('导入失败: ' + (data.detail || JSON.stringify(data)));
+                  }
+                } catch (err: any) {
+                  alert('导入失败: ' + (err.message || '网络错误'));
+                } finally {
+                  setImporting(false);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }
+              }}
+              className="hidden"
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">

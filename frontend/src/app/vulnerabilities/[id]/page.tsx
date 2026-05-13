@@ -21,22 +21,25 @@ export default function VulnerabilityDetailPage() {
   const [members, setMembers] = useState<any[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState(0);
+  const [showCommentModal, setShowCommentModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState('');
+  const [commentText, setCommentText] = useState('');
 
   const isStaff = user?.is_staff;
   const role = user?.role;
   const userId = user?.id;
   const isAssignee = report?.assignee?.id === userId;
   const isReporter = report?.reporter?.id === userId;
-  const isTeamAdmin = role === '团队管理员';
-  const isSecurityLead = role === '安全负责人';
+  const isTeamAdmin = role === '管理员';
+  const isSecurityLead = role === '项目经理';
   const isDeveloper = role === '开发人员';
-  const isObserver = role === '观察者';
+  const isObserver = role === '安全测试员';
   const hasTeam = !!(user?.team_id);
   const canManage = isStaff || isTeamAdmin || isSecurityLead || (!hasTeam && isReporter);
   const canAssign = isStaff || isTeamAdmin || isSecurityLead;
   const canFix = isStaff || (isAssignee && !isObserver) || (isDeveloper && isAssignee);
   const canReview = isStaff || isTeamAdmin || isSecurityLead || isReporter;
-  const canClose = isStaff || isTeamAdmin || isSecurityLead || (!hasTeam && isReporter);
+  const canClose = isStaff || isTeamAdmin || isSecurityLead;
 
   useEffect(() => {
     const fetch = async () => {
@@ -55,17 +58,39 @@ export default function VulnerabilityDetailPage() {
   }, [id]);
 
   const handleAction = async (action: string) => {
+    if (action === 'fix' || action === 'review_fail' || action === 'reopen') {
+      setPendingAction(action);
+      setCommentText('');
+      setShowCommentModal(true);
+      return;
+    }
+    await executeAction(action, '');
+  };
+
+  const executeAction = async (action: string, comment: string) => {
     setActionLoading(action);
     try {
-      if (action === 'fix') await reportApi.transition(id, 'submit_fix');
-      else if (action === 'review') await reportApi.transition(id, 'confirm_review');
-      else if (action === 'close') await reportApi.transition(id, 'close');
+      if (action === 'fix') await reportApi.transition(id, 'submit_fix', comment || undefined);
+      else if (action === 'review') await reportApi.transition(id, 'confirm_review', comment || undefined);
+      else if (action === 'review_fail') await reportApi.transition(id, 'review_fail', comment || undefined);
+      else if (action === 'close') await reportApi.transition(id, 'close', comment || undefined);
+      else if (action === 'reopen') await reportApi.transition(id, 'reopen', comment || undefined);
       const data = await reportApi.get(id);
       setReport(data);
       const logs = await reportApi.auditLogs(id).catch(() => []);
       setAuditLogs(Array.isArray(logs) ? logs : []);
+      setShowCommentModal(false);
+      setCommentText('');
     } catch (err: any) { alert(err.message); }
     finally { setActionLoading(''); }
+  };
+
+  const handleCommentSubmit = async () => {
+    if (pendingAction === 'reopen' && !commentText.trim()) {
+      alert('重新打开漏洞必须填写原因说明');
+      return;
+    }
+    await executeAction(pendingAction, commentText);
   };
 
   const handleAssign = async () => {
@@ -181,15 +206,27 @@ export default function VulnerabilityDetailPage() {
                       </button>
                     )}
                     {report.status === 'fixed' && canReview && (
-                      <button onClick={() => handleAction('review')} disabled={!!actionLoading}
-                        className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 disabled:opacity-50">
-                        {actionLoading === 'review' ? '处理中...' : '确认复核'}
-                      </button>
+                      <>
+                        <button onClick={() => handleAction('review')} disabled={!!actionLoading}
+                          className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 disabled:opacity-50">
+                          {actionLoading === 'review' ? '处理中...' : '确认复核通过'}
+                        </button>
+                        <button onClick={() => handleAction('review_fail')} disabled={!!actionLoading}
+                          className="w-full py-3 bg-red-600/80 text-white font-medium rounded-lg hover:bg-red-500 disabled:opacity-50">
+                          {actionLoading === 'review_fail' ? '处理中...' : '复核不通过'}
+                        </button>
+                      </>
                     )}
                     {report.status === 'reviewing' && canClose && (
                       <button onClick={() => handleAction('close')} disabled={!!actionLoading}
                         className="w-full py-3 bg-gray-600 text-white font-medium rounded-lg hover:bg-gray-500 disabled:opacity-50">
                         {actionLoading === 'close' ? '处理中...' : '关闭漏洞'}
+                      </button>
+                    )}
+                    {(report.status === 'closed' || report.status === 'reviewing') && canClose && (
+                      <button onClick={() => handleAction('reopen')} disabled={!!actionLoading}
+                        className="w-full py-3 bg-yellow-600 text-white font-medium rounded-lg hover:bg-yellow-500 disabled:opacity-50">
+                        {actionLoading === 'reopen' ? '处理中...' : '重新打开'}
                       </button>
                     )}
                     {!canManage && report.status === 'pending' && <p className="text-xs text-gray-500 text-center">等待分派</p>}
@@ -200,6 +237,7 @@ export default function VulnerabilityDetailPage() {
                     <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">处理人</h4><p className="text-sm text-gray-300">{report.assignee?.username || '未分派'}</p></div>
                     <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">报告人</h4><p className="text-sm text-gray-400">{report.reporter?.username || '未知'}</p></div>
                     {report.affected_url && <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">受影响 URL</h4><p className="text-sm text-primary break-all">{report.affected_url}</p></div>}
+                    {report.impact_scope && <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">影响范围</h4><p className="text-sm text-gray-300">{report.impact_scope}</p></div>}
                     <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">上报时间</h4><p className="text-sm text-gray-400">{report.created_at?.substring(0, 19).replace('T', ' ')}</p></div>
                   </div>
                 </div>
@@ -235,6 +273,40 @@ export default function VulnerabilityDetailPage() {
               <button onClick={handleAssign} disabled={!selectedAssignee || !!actionLoading}
                 className="flex-1 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary/80 disabled:opacity-50">
                 {actionLoading === 'assign' ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : '确认分派'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCommentModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setShowCommentModal(false)}>
+          <div className="bg-dark-card border border-dark-border rounded-xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">
+                {pendingAction === 'fix' ? '提交修复说明' : pendingAction === 'review_fail' ? '复核不通过原因' : '重新打开原因'}
+              </h3>
+              <button onClick={() => setShowCommentModal(false)} className="text-gray-400 hover:text-white"><XCircle className="w-5 h-5" /></button>
+            </div>
+            <p className="text-sm text-gray-400 mb-4">
+              {pendingAction === 'reopen' ? '请填写重新打开漏洞的原因（必填）' : '请填写相关说明信息'}
+            </p>
+            <textarea
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder={
+                pendingAction === 'fix' ? '描述修复方案和变更内容...' :
+                pendingAction === 'review_fail' ? '描述复核未通过的具体原因...' :
+                '请填写重新打开此漏洞的原因...'
+              }
+              rows={4}
+              className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-primary resize-none"
+            />
+            <div className="flex space-x-3 mt-4">
+              <button onClick={() => setShowCommentModal(false)} className="flex-1 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-gray-300 hover:bg-dark-hover">取消</button>
+              <button onClick={handleCommentSubmit} disabled={!!actionLoading}
+                className="flex-1 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary/80 disabled:opacity-50">
+                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : '确认提交'}
               </button>
             </div>
           </div>

@@ -20,6 +20,7 @@ export default function ReportVulnerabilityPage() {
     description: '',
     affected_url: '',
     reproduction_steps: '',
+    impact_scope: '',
     cve_id: '',
     project_id: 1,
     assignee_id: 0,
@@ -27,7 +28,7 @@ export default function ReportVulnerabilityPage() {
 
   const { user } = useAuth();
   const isStaff = user?.is_staff;
-  const canAssignAnyone = isStaff || user?.role === '团队管理员' || user?.role === '安全负责人';
+  const canAssignAnyone = isStaff || user?.role === '管理员' || user?.role === '项目经理';
 
   const assignableMembers = canAssignAnyone
     ? members
@@ -122,6 +123,13 @@ export default function ReportVulnerabilityPage() {
               <label className="block text-sm font-medium text-gray-300 mb-2">漏洞描述 *（至少10个字符）</label>
               <textarea rows={5} placeholder="请详细描述漏洞..." value={formData.description}
                 onChange={(e) => update('description', e.target.value)}
+                className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-primary transition-colors resize-none" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">影响范围 *</label>
+              <textarea rows={3} placeholder="请描述漏洞的影响范围，如受影响系统、用户数量等..." value={formData.impact_scope}
+                onChange={(e) => update('impact_scope', e.target.value)}
                 className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-primary transition-colors resize-none" />
             </div>
 
