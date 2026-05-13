@@ -21,11 +21,11 @@ done
 
 if python manage.py showmigrations --plan 2>/dev/null | grep -q "\[ \]"; then
     echo "Running migrations..."
-    python manage.py migrate
+    python manage.py migrate || { >&2 echo "ERROR: Migration failed"; exit 1; }
     echo "Loading initial data..."
     python manage.py loaddata website/fixtures/initial_data.json 2>/dev/null || true
     echo "Creating superuser..."
-    python manage.py initsuperuser
+    python manage.py initsuperuser 2>/dev/null || true
     echo "Collecting static files..."
     python manage.py collectstatic --noinput 2>/dev/null || true
 else
@@ -34,4 +34,4 @@ fi
 
 # Start the main application
 echo "Starting the main application http://localhost:8000/"
-exec python manage.py runserver 0.0.0.0:8000
+exec "$@"

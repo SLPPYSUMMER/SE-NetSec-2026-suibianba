@@ -277,9 +277,15 @@ LANGUAGES = (
 
 MEDIA_ROOT = "media"
 MEDIA_URL = "/media/"
-# Configure database connection pooling with 600 second max age (10 minutes)
+# Configure database connection pooling with 60 second max age
 # This enables connection reuse and prevents connection exhaustion
-db_from_env = dj_database_url.config(conn_max_age=600)
+db_from_env = dj_database_url.config(conn_max_age=60, conn_health_checks=True)
+db_from_env.setdefault("CONN_HEALTH_CHECKS", True)
+db_from_env.setdefault("OPTIONS", {})
+db_from_env["OPTIONS"].setdefault("keepalives", True)
+db_from_env["OPTIONS"].setdefault("keepalives_idle", 30)
+db_from_env["OPTIONS"].setdefault("keepalives_interval", 10)
+db_from_env["OPTIONS"].setdefault("keepalives_count", 5)
 
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
@@ -384,8 +390,8 @@ if TESTING:
 if not db_from_env:
     print("no database url detected in settings, using sqlite")
 else:
-    # Use connection pooling with 600 second max age to prevent connection exhaustion
-    DATABASES["default"] = dj_database_url.config(conn_max_age=600, ssl_require=False)
+    # Use connection pooling with health checks to prevent connection exhaustion
+    DATABASES["default"] = dj_database_url.config(conn_max_age=60, conn_health_checks=True, ssl_require=False)
     # Apply test optimizations to configured database as well
     if TESTING:
         DATABASES["default"]["TEST"] = {

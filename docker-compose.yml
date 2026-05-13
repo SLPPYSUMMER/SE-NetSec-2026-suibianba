@@ -16,6 +16,7 @@ services:
       retries: 5
     container_name: secguard-db
     restart: always
+    command: -c max_connections=200 -c shared_buffers=256MB -c effective_cache_size=768MB
 
   backend:
     build: ./backend
@@ -23,7 +24,13 @@ services:
       db:
         condition: service_healthy
     container_name: secguard-backend
-    restart: on-failure
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/secguard/statistics/overview"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     env_file:
       - ./backend/.env
     ports:
@@ -34,7 +41,12 @@ services:
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
       - POSTGRES_PASSWORD=postgres
-    command: poetry run python manage.py runserver 0.0.0.0:8000
+    command: poetry run gunicorn blt.wsgi:application \
+      --workers 4 --threads 4 --bind 0.0.0.0:8000 \
+      --timeout 120 --graceful-timeout 30 --keep-alive 5 \
+      --max-requests 1000 --max-requests-jitter 50 \
+      --worker-tmp-dir /dev/shm \
+      --access-logfile - --error-logfile - --log-level info
     tty: true
 
   frontend:
