@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { reportApi, teamsApi } from '@/services/api';
+import { reportApi, teamsApi, attachmentApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Save, Send, Loader2, AlertCircle, User } from 'lucide-react';
+import { Save, Send, Loader2, AlertCircle, User, Paperclip, Upload, X, FileText } from 'lucide-react';
 
 export default function ReportVulnerabilityPage() {
   const router = useRouter();
@@ -14,6 +14,7 @@ export default function ReportVulnerabilityPage() {
   const [error, setError] = useState('');
   const [duplicateWarn, setDuplicateWarn] = useState('');
   const [members, setMembers] = useState<any[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [formData, setFormData] = useState({
     title: '',
     severity: 'high',
@@ -50,8 +51,14 @@ export default function ReportVulnerabilityPage() {
     try {
       const payload = { ...formData };
       if (!payload.assignee_id) delete (payload as any).assignee_id;
-      await reportApi.create(payload);
-      router.push('/vulnerabilities');
+      const result = await reportApi.create(payload);
+      const vulnId = result.vuln_id || result.vuln_id;
+      if (selectedFiles.length > 0 && vulnId) {
+        for (const file of selectedFiles) {
+          await attachmentApi.upload(vulnId, file).catch(() => {});
+        }
+      }
+      router.push(vulnId ? `/vulnerabilities/${vulnId}` : '/vulnerabilities');
     } catch (err: any) {
       setError(err.message || '提交失败');
     } finally {
@@ -60,6 +67,23 @@ export default function ReportVulnerabilityPage() {
   };
 
   const update = (key: string, value: any) => setFormData({ ...formData, [key]: value });
+
+  const handleAddFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setSelectedFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+      e.target.value = '';
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   return (
     <div className="min-h-screen bg-dark-bg">
@@ -138,6 +162,42 @@ export default function ReportVulnerabilityPage() {
               <textarea rows={4} placeholder="请描述漏洞复现步骤..." value={formData.reproduction_steps}
                 onChange={(e) => update('reproduction_steps', e.target.value)}
                 className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-primary transition-colors resize-none" />
+            </div>
+
+            <div className="pt-6 border-t border-dark-border">
+              <div className="flex items-center space-x-2 mb-3">
+                <Paperclip className="w-5 h-5 text-primary" />
+                <h3 className="text-sm font-semibold text-white">附件（可选）</h3>
+                <span className="text-xs text-gray-600">POC代码、截图等</span>
+              </div>
+
+              <label className="block p-4 border-2 border-dashed border-dark-border hover:border-gray-500 hover:bg-dark-hover rounded-lg text-center cursor-pointer transition-all">
+                <div className="flex items-center justify-center space-x-2 text-gray-400">
+                  <Upload className="w-5 h-5" />
+                  <span className="text-sm">选择文件</span>
+                </div>
+                <input type="file" className="hidden" onChange={handleAddFiles} multiple
+                  accept=".jpg,.jpeg,.png,.gif,.pdf,.zip,.tar,.gz,.doc,.docx,.txt,.py,.js,.sh" />
+              </label>
+              <p className="text-xs text-gray-600 mt-2">支持 jpg/png/gif/pdf/zip/tar/gz/doc/docx/txt/py/js/sh，最大 50MB</p>
+
+              {selectedFiles.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {selectedFiles.map((file, i) => (
+                    <div key={i} className="flex items-center justify-between bg-dark-bg rounded-lg p-2.5 border border-dark-border">
+                      <div className="flex items-center space-x-2 min-w-0">
+                        <FileText className="w-4 h-4 text-green-400 flex-shrink-0" />
+                        <span className="text-sm text-white truncate">{file.name}</span>
+                        <span className="text-xs text-gray-500 flex-shrink-0">({formatSize(file.size)})</span>
+                      </div>
+                      <button onClick={() => removeFile(i)}
+                        className="p-1 text-gray-500 hover:text-red-400 flex-shrink-0">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between pt-6 border-t border-dark-border">

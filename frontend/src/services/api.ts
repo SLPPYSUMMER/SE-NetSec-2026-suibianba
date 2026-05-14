@@ -208,10 +208,10 @@ export const attachmentApi = {
   upload: async (vulnId: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`/api/reports/${vulnId}/attachments`, { method: 'POST', body: formData });
+    const res = await fetch(`/api/secguard/reports/${vulnId}/attachments`, { method: 'POST', body: formData });
     return res.json();
   },
-  downloadUrl: (attachmentId: number) => `/api/attachments/${attachmentId}/download`,
+  downloadUrl: (attachmentId: number) => `/api/secguard/attachments/${attachmentId}/download`,
   delete: (attachmentId: number) =>
     request<{ success: boolean }>(`/attachments/${attachmentId}`, { method: 'DELETE' }),
 };

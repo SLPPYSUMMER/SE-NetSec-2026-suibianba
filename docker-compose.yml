@@ -38,15 +38,27 @@ services:
     volumes:
       - ./backend/website:/blt/website:cached
       - ./backend/blt:/blt/blt:cached
+      - ./backend/media:/blt/media
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
       - POSTGRES_PASSWORD=postgres
-    command: poetry run gunicorn blt.wsgi:application \
-      --workers 4 --threads 4 --bind 0.0.0.0:8000 \
-      --timeout 120 --graceful-timeout 30 --keep-alive 5 \
-      --max-requests 1000 --max-requests-jitter 50 \
-      --worker-tmp-dir /dev/shm \
-      --access-logfile - --error-logfile - --log-level info
+    command:
+      - poetry
+      - run
+      - gunicorn
+      - blt.wsgi:application
+      - --workers=4
+      - --threads=4
+      - --bind=0.0.0.0:8000
+      - --timeout=120
+      - --graceful-timeout=30
+      - --keep-alive=5
+      - --max-requests=1000
+      - --max-requests-jitter=50
+      - --worker-tmp-dir=/dev/shm
+      - --access-logfile=-
+      - --error-logfile=-
+      - --log-level=info
     tty: true
 
   frontend:
