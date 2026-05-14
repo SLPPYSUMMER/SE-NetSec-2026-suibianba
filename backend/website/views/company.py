@@ -22,7 +22,11 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.views.generic import View
-from slack_bolt import App
+
+try:
+    from slack_bolt import App
+except ImportError:
+    App = None
 
 from website.models import (
     DailyStatusReport,

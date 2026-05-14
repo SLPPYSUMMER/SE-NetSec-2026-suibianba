@@ -3,7 +3,7 @@ FROM python:3.11.2 AS builder
 ENV PYTHONUNBUFFERED=1
 WORKDIR /blt
 
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y postgresql-client libpq-dev \
     libmemcached11 libmemcachedutil2 libmemcached-dev libz-dev \
@@ -14,26 +14,46 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     rm -rf /var/lib/apt/lists/*
 
 # weasyprint PDF export dependencies
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
+# 配置国内镜像源加速（阿里云 + 清华源备份）
 RUN pip install --upgrade pip && pip install poetry==2.2.1
-RUN pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/simple/
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip config set global.trusted-host mirrors.aliyun.com
 RUN poetry config virtualenvs.create false
-RUN poetry source add --priority=default mirrors https://mirrors.tuna.tsinghua.edu.cn/pypi/simple/ 2>/dev/null || true
-COPY pyproject.toml poetry.lock* ./
+RUN poetry source add --priority=primary aliyun https://mirrors.aliyun.com/pypi/simple/ 2>/dev/null || true && \
+    poetry source add --priority=default tsinghua https://mirrors.tuna.tsinghua.edu.cn/pypi/simple/ 2>/dev/null || true
+
+COPY pyproject.toml poetry.lock* requirements.txt ./
 RUN pip uninstall -y httpx || true
-RUN poetry lock 2>/dev/null || true && poetry install --no-root --no-interaction || (poetry lock && poetry install --no-root --no-interaction)
+
+# 安装核心依赖（优先使用 poetry，失败则回退到 pip）
+RUN echo "=== Attempting Poetry Install ===" && \
+    (poetry lock 2>/dev/null || true) && \
+    (poetry install --no-root --no-interaction --timeout 300 && \
+     echo "✅ Poetry install succeeded" || \
+     (echo "⚠️  Poetry install failed, using pip fallback..." && \
+      pip install --no-cache-dir --index-url https://mirrors.aliyun.com/pypi/simple/ \
+      --trusted-host mirrors.aliyun.com \
+      -r requirements.txt && \
+      echo "✅ Pip fallback install succeeded"))
+
+# 确保关键依赖已安装
+RUN pip install django django-ninja djangorestframework psycopg2-binary \
+    --index-url https://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com || true
+
 RUN pip install django-cors-headers 2>/dev/null || true
 
 # Install OWASP Nettacker - automated penetration testing tool
-# global pip index is already set to Tsinghua mirror on line 17
-RUN pip install nettacker --index-url https://pypi.org/simple/ || \
-    pip install git+https://github.com/OWASP/Nettacker.git || \
-    echo "Warning: nettacker installation failed, scan feature may not work"
+RUN pip install nettacker --index-url https://mirrors.aliyun.com/pypi/simple/ --timeout 120 || \
+    pip install nettacker --index-url https://pypi.org/simple/ --timeout 120 || \
+    (pip install git+https://github.com/OWASP/Nettacker.git --timeout 180 || \
+     echo "Warning: nettacker installation failed, scan feature may not work")
 
 # Verify nettacker is usable (CLI or at least importable)
 RUN nettacker --help 2>/dev/null || python -m nettacker --help 2>/dev/null || \
