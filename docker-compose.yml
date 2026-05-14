@@ -38,11 +38,72 @@ services:
     volumes:
       - ./backend/website:/blt/website:cached
       - ./backend/blt:/blt/blt:cached
+    # ============================================================
+    # ⚙️ Backend 启动命令配置说明
+    # ============================================================
+    #
+    # 📌 当前模式：开发调试模式 (Development Mode)
+    #    - 使用 Django runserver 开发服务器
+    #    - 支持代码热重载、详细错误日志
+    #    - 适用于：本地开发、功能测试、问题排查
+    #
+    # 🔄 切换到生产模式 (Production Mode)：
+    #    将下面的 command 替换为：
+    #
+    #    command: poetry run gunicorn blt.wsgi:application \
+    #      --workers 4 \                    # 工作进程数（建议CPU核心数×2+1）
+    #      --threads 4 \                    # 每个进程的线程数
+    #      --bind 0.0.0.0:8000 \            # 监听地址和端口
+    #      --timeout 120 \                  # worker超时时间（秒）
+    #      --graceful-timeout 30 \          # 优雅重启超时
+    #      --keep-alive 5 \                 # HTTP keep-alive超时
+    #      --max-requests 1000 \            # 每个worker最大请求数后重启（防止内存泄漏）
+    #      --max-requests-jitter 50 \       # 最大请求随机抖动（避免同时重启）
+    #      --worker-tmp-dir /dev/shm \     # worker临时文件目录
+    #      --access-logfile - \             # 访问日志输出到stdout
+    #      --error-logfile - \              # 错误日志输出到stdout
+    #      --log-level info                 # 日志级别: debug/info/warning/error
+    #
+    # 🔧 生产环境优化建议：
+    #    1. 移除 `tty: true` 和 `DEBUG=False` 中的 DEBUG=False（保持False即可）
+    #    2. 考虑添加健康检查: healthcheck
+    #    3. 配置资源限制: deploy.resources.limits
+    #    4. 使用 nginx 反向代理 + 静态文件服务
+    #
+    # ⚠️ 注意事项：
+    #    - 生产环境必须使用 gunicorn（高性能WSGI服务器）
+    #    - runserver 仅用于开发/测试，不安全且性能差
+    #    - 切换前确保所有依赖已正确安装到Docker镜像中
+    #
+    # 📅 最后修改：2026-05-14 (修复ImportError和依赖安装问题)
+    # ============================================================
+
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
       - POSTGRES_PASSWORD=postgres
       - DEBUG=False
-    command: bash -c "pip install --quiet -r /blt/requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com 2>&1 | tail -5 || true; python manage.py runserver 0.0.0.0:8000"
+    # [DEV] 开发模式：动态安装依赖 + 启动开发服务器
+    command: >
+      bash -c "pip install --quiet -r /blt/requirements.txt
+      --index-url https://mirrors.aliyun.com/pypi/simple/
+      --trusted-host mirrors.aliyun.com
+      2>&1 | tail -5 || true;
+      python manage.py runserver 0.0.0.0:8000"
+    # [PROD] 生产模式（取消注释并删除上面那行）:
+#     command: >
+#       poetry run gunicorn blt.wsgi:application
+#       --workers 4
+#       --threads 4
+#       --bind 0.0.0.0:8000
+#       --timeout 120
+#       --graceful-timeout 30
+#       --keep-alive 5
+#       --max-requests 1000
+#       --max-requests-jitter 50
+#       --worker-tmp-dir /dev/shm
+#       --access-logfile -
+#       --error-logfile -
+#       --log-level info
     tty: true
 
   frontend:
