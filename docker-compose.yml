@@ -41,12 +41,8 @@ services:
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
       - POSTGRES_PASSWORD=postgres
-    command: poetry run gunicorn blt.wsgi:application \
-      --workers 4 --threads 4 --bind 0.0.0.0:8000 \
-      --timeout 120 --graceful-timeout 30 --keep-alive 5 \
-      --max-requests 1000 --max-requests-jitter 50 \
-      --worker-tmp-dir /dev/shm \
-      --access-logfile - --error-logfile - --log-level info
+      - DEBUG=False
+    command: bash -c "pip install --quiet -r /blt/requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com 2>&1 | tail -5 || true; python manage.py runserver 0.0.0.0:8000"
     tty: true
 
   frontend:

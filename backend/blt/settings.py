@@ -120,6 +120,7 @@ SOCIAL_AUTH_GITHUB_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "blank")
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    "blt.middleware.csrf_exempt.CsrfExemptMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "blt.middleware.domain.DomainMiddleware",
     "django.middleware.locale.LocaleMiddleware",
@@ -415,6 +416,8 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "localhost",
     "0.0.0.0",
+    "backend",
+    "secguard-backend",
 ]
 ALLOWED_HOSTS.extend(os.environ.get("ALLOWED_HOSTS", "").split(","))
 
@@ -581,6 +584,7 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read CSRF token for AJAX requests
 CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_TRUSTED_ORIGINS = ["http://localhost:3001", "http://localhost:8000", "http://127.0.0.1:3001", "http://127.0.0.1:8000"]
 
 MDEDITOR_CONFIGS = {
     "default": {

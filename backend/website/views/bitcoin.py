@@ -11,8 +11,13 @@ from django.shortcuts import get_object_or_404, render
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_POST
-from slack_sdk.errors import SlackApiError
-from slack_sdk.web import WebClient
+
+try:
+    from slack_sdk.errors import SlackApiError
+    from slack_sdk.web import WebClient
+except ImportError:
+    SlackApiError = None
+    WebClient = None
 
 from blt import settings as blt_settings
 from website.models import BaconEarning, BaconSubmission, Badge, Organization, SlackIntegration, UserBadge
