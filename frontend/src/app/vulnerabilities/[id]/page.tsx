@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { reportApi, teamsApi, SEVERITY_MAP, STATUS_MAP } from '@/services/api';
+import { reportApi, teamsApi, attachmentApi, SEVERITY_MAP, STATUS_MAP } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { AlertTriangle, Shield, FileText, User, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, FileText, User, Loader2, CheckCircle2, XCircle, Paperclip, Upload, Download, Trash2, File, FileCode } from 'lucide-react';
 
 export default function VulnerabilityDetailPage() {
   const params = useParams();
@@ -24,6 +24,9 @@ export default function VulnerabilityDetailPage() {
   const [showCommentModal, setShowCommentModal] = useState(false);
   const [pendingAction, setPendingAction] = useState('');
   const [commentText, setCommentText] = useState('');
+  const [attachments, setAttachments] = useState<any[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const isStaff = user?.is_staff;
   const role = user?.role;
@@ -51,6 +54,8 @@ export default function VulnerabilityDetailPage() {
         setAuditLogs(Array.isArray(logs) ? logs : []);
         const m = await teamsApi.members().catch(() => ({ items: [] }));
         setMembers(m.items || []);
+        const a = await attachmentApi.list(id).catch(() => []);
+        setAttachments(Array.isArray(a) ? a : []);
       } catch (err: any) { setError(err.message); }
       finally { setLoading(false); }
     };
@@ -105,6 +110,56 @@ export default function VulnerabilityDetailPage() {
       setShowAssignModal(false);
     } catch (err: any) { alert(err.message); }
     finally { setActionLoading(''); }
+  };
+
+  const refreshAttachments = async () => {
+    const a = await attachmentApi.list(id).catch(() => []);
+    setAttachments(Array.isArray(a) ? a : []);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setSelectedFile(file);
+    e.target.value = '';
+  };
+
+  const handleUploadClick = async () => {
+    if (!selectedFile) return;
+    setUploading(true);
+    try {
+      await attachmentApi.upload(id, selectedFile);
+      await refreshAttachments();
+      setSelectedFile(null);
+    } catch (err: any) {
+      alert(err.message || '上传失败');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: number) => {
+    if (!confirm('确定要删除此附件吗？')) return;
+    try {
+      await attachmentApi.delete(attachmentId);
+      await refreshAttachments();
+    } catch (err: any) {
+      alert(err.message || '删除失败');
+    }
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const getFileIcon = (filename: string) => {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext || '')) return <FileText className="w-4 h-4 text-green-400" />;
+    if (['py', 'js', 'sh', 'txt', 'diff', 'patch'].includes(ext || '')) return <FileCode className="w-4 h-4 text-yellow-400" />;
+    if (['zip', 'tar', 'gz'].includes(ext || '')) return <File className="w-4 h-4 text-blue-400" />;
+    if (ext === 'pdf') return <FileText className="w-4 h-4 text-red-400" />;
+    return <Paperclip className="w-4 h-4 text-gray-400" />;
   };
 
   const sev = (s: string) => SEVERITY_MAP[s] || { label: s, color: 'text-gray-400', bg: 'bg-gray-500' };
@@ -239,6 +294,85 @@ export default function VulnerabilityDetailPage() {
                     {report.affected_url && <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">受影响 URL</h4><p className="text-sm text-primary break-all">{report.affected_url}</p></div>}
                     {report.impact_scope && <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">影响范围</h4><p className="text-sm text-gray-300">{report.impact_scope}</p></div>}
                     <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">上报时间</h4><p className="text-sm text-gray-400">{report.created_at?.substring(0, 19).replace('T', ' ')}</p></div>
+                  </div>
+
+                  <div className="mt-6 pt-6 border-t border-dark-border">
+                    <div className="flex items-center space-x-2 mb-4">
+                      <Paperclip className="w-5 h-5 text-primary" />
+                      <h3 className="text-lg font-semibold text-white">附件</h3>
+                      <span className="text-xs text-gray-600">({attachments.length})</span>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className={`block p-4 border-2 border-dashed rounded-lg text-center cursor-pointer transition-all ${
+                        selectedFile ? 'border-green-500/50 bg-green-500/5' : 'border-dark-border hover:border-gray-500 hover:bg-dark-hover'
+                      }`}>
+                        {selectedFile ? (
+                          <div className="flex items-center justify-center space-x-2 text-green-400">
+                            <FileText className="w-5 h-5" />
+                            <span className="text-sm truncate max-w-[200px]">{selectedFile.name}</span>
+                            <span className="text-xs text-gray-500">({formatSize(selectedFile.size)})</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center space-x-2 text-gray-400">
+                            <Upload className="w-5 h-5" />
+                            <span className="text-sm">选择文件</span>
+                          </div>
+                        )}
+                        <input type="file" className="hidden" onChange={handleFileSelect} disabled={uploading}
+                          accept=".jpg,.jpeg,.png,.gif,.pdf,.zip,.tar,.gz,.doc,.docx,.txt,.py,.js,.sh" />
+                      </label>
+
+                      {selectedFile && (
+                        <div className="flex space-x-2">
+                          <button onClick={handleUploadClick} disabled={uploading}
+                            className="flex-1 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary/80 disabled:opacity-50 flex items-center justify-center space-x-2">
+                            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                            <span>{uploading ? '上传中...' : '上传文件'}</span>
+                          </button>
+                          <button onClick={() => setSelectedFile(null)} disabled={uploading}
+                            className="px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-gray-400 hover:text-white disabled:opacity-50">
+                            取消
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-2">支持 jpg/png/gif/pdf/zip/tar/gz/doc/docx/txt/py/js/sh，最大 50MB</p>
+
+                    {attachments.length > 0 && (
+                      <div className="mt-4 space-y-2 max-h-64 overflow-y-auto">
+                        {attachments.map(att => (
+                          <div key={att.id}
+                            className="bg-dark-bg rounded-lg p-3 border border-dark-border flex items-center justify-between group hover:border-gray-600 transition-colors">
+                            <div className="flex items-center space-x-3 min-w-0">
+                              {getFileIcon(att.filename)}
+                              <div className="min-w-0">
+                                <p className="text-sm text-white truncate" title={att.filename}>{att.filename}</p>
+                                <p className="text-xs text-gray-500">
+                                  {formatSize(att.size)}
+                                  {att.uploader_name && <span className="ml-2">· {att.uploader_name}</span>}
+                                  <span className="ml-2">· {att.uploaded_at?.substring(0, 10)}</span>
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <a href={attachmentApi.downloadUrl(att.id)}
+                                className="p-1.5 text-gray-400 hover:text-primary hover:bg-dark-hover rounded transition-colors"
+                                title="下载">
+                                <Download className="w-4 h-4" />
+                              </a>
+                              {(isStaff || att.uploader_name === user?.name) && (
+                                <button onClick={() => handleDeleteAttachment(att.id)}
+                                  className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-dark-hover rounded transition-colors"
+                                  title="删除">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

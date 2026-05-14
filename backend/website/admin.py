@@ -13,6 +13,7 @@ from import_export.admin import ImportExportModelAdmin
 
 from website.models import (
     Asset,
+    Attachment,
     IP,
     Activity,
     ActivityLog,
@@ -1369,3 +1370,31 @@ class AuditLogAdmin(admin.ModelAdmin):
     date_hierarchy = "timestamp"
     ordering = ("-timestamp",)
     readonly_fields = ("user", "action", "target_type", "target_id", "detail", "ip_address", "timestamp")
+
+
+@admin.register(Attachment)
+class AttachmentAdmin(admin.ModelAdmin):
+    """附件管理"""
+    list_display = ("id", "filename", "size_display", "report_link", "uploader", "uploaded_at")
+    list_filter = ("uploaded_at",)
+    search_fields = ("filename", "report__vuln_id", "uploader__username")
+    date_hierarchy = "uploaded_at"
+    ordering = ("-uploaded_at",)
+    readonly_fields = ("uploaded_at",)
+
+    def size_display(self, obj):
+        if obj.size < 1024:
+            return f"{obj.size} B"
+        elif obj.size < 1024 * 1024:
+            return f"{obj.size / 1024:.1f} KB"
+        else:
+            return f"{obj.size / (1024 * 1024):.1f} MB"
+    size_display.short_description = "文件大小"
+
+    def report_link(self, obj):
+        from django.utils.html import format_html
+        return format_html(
+            '<a href="/api/secguard/reports/{}" target="_blank">{}</a>',
+            obj.report.vuln_id, obj.report.vuln_id,
+        )
+    report_link.short_description = "关联漏洞"

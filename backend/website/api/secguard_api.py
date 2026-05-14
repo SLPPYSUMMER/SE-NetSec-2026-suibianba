@@ -863,6 +863,8 @@ def get_report_detail(request: HttpRequest, vuln_id: str):
     except Report.DoesNotExist:
         raise HttpError(400, f"漏洞报告 {vuln_id} 不存在或已被删除")
 
+    check_report_access(request, report)
+
     return annotate_report(report)
 
 
@@ -1296,6 +1298,19 @@ class AttachmentSchema(BaseModel):
         from_attributes = True
 
 
+def check_report_access(request: HttpRequest, report):
+    """检查用户是否有权访问指定报告。staff 可访问全部，普通用户只能访问自己团队或自己上报的"""
+    if request.user.is_staff:
+        return
+    if report.reporter == request.user:
+        return
+    if report.team:
+        team, _ = get_user_team(request)
+        if team and team == report.team:
+            return
+    raise HttpError(403, "无权访问此漏洞报告，请联系团队管理员")
+
+
 @router.post("/reports/{vuln_id}/attachments")
 def upload_attachment(request: HttpRequest, vuln_id: str):
     """上传附件到指定漏洞报告"""
@@ -1306,6 +1321,8 @@ def upload_attachment(request: HttpRequest, vuln_id: str):
         report = Report.objects.get(vuln_id=vuln_id)
     except Report.DoesNotExist:
         raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
+
+    check_report_access(request, report)
 
     uploaded = request.FILES.get("file")
     if not uploaded:
@@ -1333,6 +1350,14 @@ def upload_attachment(request: HttpRequest, vuln_id: str):
         request=request,
     )
 
+    if report.team:
+        notify_team_admins(
+            report.team,
+            f"漏洞 {vuln_id} 有新附件: {uploaded.name}",
+            "alert",
+            f"/vulnerabilities/{vuln_id}",
+        )
+
     return {
         "id": attachment.id,
         "filename": attachment.filename,
@@ -1353,6 +1378,8 @@ def list_attachments(request: HttpRequest, vuln_id: str):
         report = Report.objects.get(vuln_id=vuln_id)
     except Report.DoesNotExist:
         raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
+
+    check_report_access(request, report)
 
     attachments = Attachment.objects.filter(report=report).select_related('uploader')
     return [
@@ -1376,6 +1403,8 @@ def download_attachment(request: HttpRequest, attachment_id: int):
 
     attachment = get_object_or_404(Attachment, id=attachment_id)
 
+    check_report_access(request, attachment.report)
+
     from django.http import FileResponse
     response = FileResponse(attachment.file, content_type=attachment.mime_type or 'application/octet-stream')
     response['Content-Disposition'] = f'attachment; filename="{attachment.filename}"'
@@ -1392,6 +1421,8 @@ def delete_attachment(request: HttpRequest, attachment_id: int):
 
     if not (request.user.is_staff or attachment.uploader == request.user):
         raise HttpError(403, "无权删除此附件")
+
+    check_report_access(request, attachment.report)
 
     attachment.file.delete(save=False)
     attachment.delete()
