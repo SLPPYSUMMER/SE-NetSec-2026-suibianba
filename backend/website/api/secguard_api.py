@@ -422,7 +422,16 @@ def filter_by_team(queryset, request: HttpRequest):
     if hasattr(model, 'created_by'):
         return queryset.filter(Q(team=team) | Q(created_by=request.user))
     elif hasattr(model, 'reporter'):
-        return queryset.filter(Q(team=team) | Q(reporter=request.user))
+        role, _ = get_user_team_role(request, team=team)
+        if role in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
+            team_q = Q(team=team)
+        elif role == TeamMembership.Role.DEVELOPER:
+            team_q = Q(team=team) & Q(assignee=request.user)
+        elif role == TeamMembership.Role.OBSERVER:
+            team_q = Q(team=team) & Q(reporter=request.user)
+        else:
+            team_q = Q(team=team)
+        return queryset.filter(team_q | Q(reporter=request.user) | Q(assignee=request.user))
     elif hasattr(model, 'user'):
         return queryset.filter(Q(team=team) | Q(user=request.user))
     
@@ -1335,7 +1344,7 @@ def check_report_access(request: HttpRequest, report):
         team, _ = get_user_team(request)
         if team and team == report.team:
             return
-    raise HttpError(403, "无权访问此漏洞报告，请联系团队管理员")
+    raise HttpError(403, "无权访问此漏洞报告，请确认当前团队状态是否正常或联系团队管理员")
 
 
 @router.post("/reports/{vuln_id}/attachments")
