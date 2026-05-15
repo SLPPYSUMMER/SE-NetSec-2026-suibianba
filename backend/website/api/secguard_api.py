@@ -275,16 +275,33 @@ def notify_team_admins(team, message: str, notification_type: str = "alert", lin
         create_notification(m.user, message, notification_type, link)
 
 
-def get_user_team_role(request: HttpRequest):
+_GET_USER_TEAM_ROLE_UNSET = object()
+
+def get_user_team_role(request: HttpRequest, team=_GET_USER_TEAM_ROLE_UNSET):
     """
     获取当前用户的团队角色。
-    返回 (role, has_team)，role 为 TeamMembership.Role 值或 None。
-    系统管理员返回 ('admin', True)。
+
+    如果传入 team 参数（含 None），查询用户在该指定团队中的角色；
+    如果未传入 team 参数，使用用户当前活跃团队（兼容旧调用）。
+
+    返回 (role, has_team)，系统管理员返回 ('admin', True)。
     """
     if not request.user.is_authenticated:
         return None, False
     if request.user.is_staff:
         return 'admin', True
+
+    if team is not _GET_USER_TEAM_ROLE_UNSET:
+        if team is None:
+            return None, False
+        membership = TeamMembership.objects.filter(
+            user=request.user, team=team,
+            status=TeamMembership.Status.ACCEPTED,
+        ).first()
+        if membership:
+            return membership.role, True
+        return None, False
+
     try:
         profile = request.user.userprofile
         if profile.team:
@@ -384,9 +401,15 @@ def filter_by_team(queryset, request: HttpRequest):
     team, _ = get_user_team(request)
     if team is None:
         model = queryset.model
+        from django.db.models import Q
+        q = Q()
         if hasattr(model, 'reporter'):
-            return queryset.filter(reporter=request.user)
-        elif hasattr(model, 'created_by'):
+            q |= Q(reporter=request.user)
+        if hasattr(model, 'assignee'):
+            q |= Q(assignee=request.user)
+        if q:
+            return queryset.filter(q)
+        if hasattr(model, 'created_by'):
             return queryset.filter(created_by=request.user)
         elif hasattr(model, 'user'):
             return queryset.filter(user=request.user)
@@ -931,12 +954,14 @@ def assign_report(request: HttpRequest, vuln_id: str, payload: AssignReportSchem
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
 
-    team_role, has_team = get_user_team_role(request)
-
     try:
         report = Report.objects.select_related('assignee').get(vuln_id=vuln_id)
     except Report.DoesNotExist:
         raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
+
+    check_report_access(request, report)
+
+    team_role, has_team = get_user_team_role(request, team=report.team)
 
     if report.status not in [Report.Status.PENDING, Report.Status.PROCESSING]:
         raise HttpError(400,
@@ -1009,6 +1034,8 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
     except Report.DoesNotExist:
         raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
 
+    check_report_access(request, report)
+
     valid_actions = {
         'submit_fix': {
             'from_status': [Report.Status.PROCESSING],
@@ -1064,7 +1091,7 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
             f"允许的起始状态: {', '.join(allowed_from)}"
         )
 
-    team_role, has_team = get_user_team_role(request)
+    team_role, has_team = get_user_team_role(request, team=report.team)
     is_allowed = False
 
     if request.user.is_staff:
@@ -1323,6 +1350,12 @@ def upload_attachment(request: HttpRequest, vuln_id: str):
         raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
 
     check_report_access(request, report)
+
+    if report.assignee and report.assignee != request.user:
+        if report.reporter != request.user:
+            team_role, _ = get_user_team_role(request, team=report.team)
+            if team_role not in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
+                raise HttpError(403, "此漏洞已指派处理人，仅处理人或团队管理员可上传附件")
 
     uploaded = request.FILES.get("file")
     if not uploaded:
@@ -2563,7 +2596,9 @@ def batch_delete_assets(request: HttpRequest, payload: AssetDeleteSchema):
 @router.get("/teams/members")
 def list_team_members(request: HttpRequest):
     """列出当前用户所在团队的所有已通过成员"""
-    team, membership = require_team(request)
+    team, membership = get_user_team(request)
+    if team is None:
+        return {"items": [], "team_id": None, "team_name": None}
     ms = TeamMembership.objects.filter(team=team, status=TeamMembership.Status.ACCEPTED).select_related('user')
     items = []
     for m in ms:

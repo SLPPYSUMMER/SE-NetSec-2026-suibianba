@@ -30,10 +30,21 @@ export default function ReportVulnerabilityPage() {
   const { user } = useAuth();
   const isStaff = user?.is_staff;
   const canAssignAnyone = isStaff || user?.role === '管理员' || user?.role === '项目经理';
+  const hasTeam = !!(user?.team_id);
 
-  const assignableMembers = canAssignAnyone
-    ? members
-    : members.filter((m: any) => m.user_id === user?.id);
+  const assignableMembers = (() => {
+    if (canAssignAnyone) {
+      if (members.length === 0 && user && !hasTeam) {
+        return [{ user_id: user.id, username: user.name, role_label: '自己' }];
+      }
+      return members;
+    }
+    const filtered = members.filter((m: any) => m.user_id === user?.id);
+    if (filtered.length === 0 && user && !hasTeam) {
+      return [{ user_id: user.id, username: user.name, role_label: '自己' }];
+    }
+    return filtered;
+  })();
 
   useEffect(() => {
     teamsApi.members().then(m => setMembers(m.items || [])).catch(() => {});

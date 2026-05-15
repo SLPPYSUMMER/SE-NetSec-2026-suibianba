@@ -219,3 +219,4 @@ __marimo__/
 
 # Django collectstatic output
 backend/blt/staticfiles/
+backend/media/attachments

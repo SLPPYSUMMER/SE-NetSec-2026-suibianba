@@ -109,7 +109,11 @@ INSTALLED_APPS = (
 )
 
 if DEBUG:
-    INSTALLED_APPS += ("livereload",)
+    try:
+        import livereload  # noqa: F401
+        INSTALLED_APPS += ("livereload",)
+    except ImportError:
+        pass
 
 SOCIAL_AUTH_GITHUB_KEY = os.environ.get("GITHUB_CLIENT_ID", "blank")
 
@@ -140,7 +144,11 @@ MIDDLEWARE = [
 ]
 
 if DEBUG:
-    MIDDLEWARE += ("livereload.middleware.LiveReloadScript",)
+    try:
+        import livereload  # noqa: F401, F811
+        MIDDLEWARE += ("livereload.middleware.LiveReloadScript",)
+    except ImportError:
+        pass
 
 BLUESKY_USERNAME = env("BLUESKY_USERNAME", default="default_username")
 BLUESKY_PASSWORD = env("BLUESKY_PASSWORD", default="default_password")
@@ -180,9 +188,12 @@ if DEBUG and not TESTING:
         "SHOW_TOOLBAR_CALLBACK": lambda request: True,
     }
 
-    INSTALLED_APPS += ("debug_toolbar",)
-
-    MIDDLEWARE += ("debug_toolbar.middleware.DebugToolbarMiddleware",)
+    try:
+        import debug_toolbar  # noqa: F401
+        INSTALLED_APPS += ("debug_toolbar",)
+        MIDDLEWARE += ("debug_toolbar.middleware.DebugToolbarMiddleware",)
+    except ImportError:
+        pass
 
 ROOT_URLCONF = "blt.urls"
 
