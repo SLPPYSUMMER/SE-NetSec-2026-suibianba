@@ -597,19 +597,21 @@ def run_scan(scan_task_id: int, target: str, scanner_type: str):
         with _manager._scans_lock:
             _manager._active_scans[scan_task_id] = proc
         
-        # 流式读取输出
-        findings = _read_scan_output(proc, task, start_time, timeout_seconds)
-        
+        # 流式读取输出（进度解析）
+        _read_scan_output(proc, task, start_time, timeout_seconds)
+
         # 标记完成
         task.progress = 100
         task.save(update_fields=['progress'])
-        
-        # 处理结果
+
+        # 加载扫描结果并解析发现
+        data = _load_scan_results(output_file)
+        findings = [_parse_finding(e, target) for e in (data if isinstance(data, list) else []) if isinstance(e, dict)]
+        findings = [f for f in findings if f is not None]
+
+        # 保存发现和提取资产
         project = _get_or_create_default_project(Organization, Project)
         _save_findings(findings, task, project, target)
-        
-        # 提取资产
-        data = _load_scan_results(output_file)
         asset_count = _extract_assets(data, task, target) if isinstance(data, list) else 0
         
         # 更新最终状态

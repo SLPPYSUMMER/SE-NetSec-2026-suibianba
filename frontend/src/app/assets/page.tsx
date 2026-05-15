@@ -127,19 +127,19 @@ export default function AssetsPage() {
     }
   };
 
-  // 删除单个资产
-  const handleDelete = async (assetId: number) => {
+  // 删除单个资产（按目标URL）
+  const handleDelete = async (target: string, synId: number) => {
     if (!confirm('确定要删除此资产吗？')) return;
     try {
-      await assetsApi.delete(assetId);
-      setSelectedIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
+      await assetsApi.delete(target);
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(synId); return next; });
       fetchAssets();
     } catch (err: any) {
       alert(err.message || '删除失败');
     }
   };
 
-  // 批量删除资产
+  // 批量删除资产（按目标URL）
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) {
       alert('请先选择要删除的资产');
@@ -148,7 +148,8 @@ export default function AssetsPage() {
     if (!confirm(`确定要删除选中的 ${selectedIds.size} 个资产吗？`)) return;
     setBatchDeleting(true);
     try {
-      const result = await assetsApi.batchDelete(Array.from(selectedIds));
+      const targets = filteredAssets.filter(a => selectedIds.has(a.id)).map(a => a.url);
+      const result = await assetsApi.batchDelete(targets);
       alert(result.message);
       setSelectedIds(new Set());
       fetchAssets();
@@ -399,7 +400,7 @@ export default function AssetsPage() {
 
                   return (
                     <>
-                      <tr key={asset.id} className="hover:bg-dark-hover/50 transition-colors cursor-pointer"
+                      <tr key={asset.id} className="group hover:bg-dark-hover/50 transition-colors cursor-pointer"
                         onClick={() => subAssets.length > 0 && toggleExpand(asset.id)}>
                         <td className="px-3 py-4" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center space-x-2">
@@ -483,7 +484,7 @@ export default function AssetsPage() {
                           <span className="text-sm text-gray-400">{asset.last_scan?.substring(0, 10) || '--'}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => handleDelete(asset.id)}
+                          <button onClick={() => handleDelete(asset.url, asset.id)}
                             className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
                             <Trash2 className="w-4 h-4" />
                           </button>
