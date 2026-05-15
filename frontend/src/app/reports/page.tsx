@@ -4,26 +4,53 @@ import { useState, useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { reportApi, SEVERITY_MAP } from '@/services/api';
-import { Filter, TrendingUp, Clock, FileText, Download, Eye, CheckSquare, Loader2, User, Building, Layers } from 'lucide-react';
+import { Filter, Download, Eye, CheckSquare, Loader2, User, Building, Layers } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function ReportsPage() {
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedSeverity, setSelectedSeverity] = useState('all');
+  const [selectedProject, setSelectedProject] = useState<number | 'all'>('all');
+  const [dateRange, setDateRange] = useState<'7d' | '30d' | 'all' | 'custom'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [exportFormat, setExportFormat] = useState('pdf');
   const [loading, setLoading] = useState(false);
   const [exportData, setExportData] = useState<any>(null);
   const [previewMode, setPreviewMode] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
+  const [projects, setProjects] = useState<any[]>([]);
 
   // [单团队模式] 数据过滤逻辑已简化，无需加载团队列表
 
-  const handleDownloadFile = async (format: string) => {
+  useEffect(() => {
+    fetch('/api/secguard/projects', { credentials: 'include' })
+      .then(r => r.json()).then(setProjects).catch(() => {});
+  }, []);
+
+  const buildParams = (format: string): Record<string, string> => {
+    const params: Record<string, string> = { format };
+    if (selectedStatus !== 'all') params.status = selectedStatus;
+    if (selectedSeverity !== 'all') params.severity = selectedSeverity;
+    if (selectedProject !== 'all') params.project_id = String(selectedProject);
+    if (dateRange === '7d') {
+      const d = new Date(); d.setDate(d.getDate() - 7);
+      params.date_from = d.toISOString().substring(0, 10);
+    } else if (dateRange === '30d') {
+      const d = new Date(); d.setDate(d.getDate() - 30);
+      params.date_from = d.toISOString().substring(0, 10);
+    } else if (dateRange === 'custom') {
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+    }
+    return params;
+  };
+
+  const handleExport = async (format: string) => {
     setDownloading(true);
     try {
-      const params: Record<string, string> = { format };
-      if (selectedStatus !== 'all') params.status = selectedStatus;
-      await reportApi.export(params, true);
+      await reportApi.export(buildParams(format), true);
     } catch (err: any) {
       alert(err.message || '导出失败');
     } finally { setDownloading(false); }
@@ -32,33 +59,12 @@ export default function ReportsPage() {
   const handlePreview = async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = { format: 'json' };
-      if (selectedStatus !== 'all') params.status = selectedStatus;
-      const data = await reportApi.export(params);
+      const data = await reportApi.export(buildParams('json'));
       setExportData(data);
       setPreviewMode(true);
     } catch (err: any) {
       alert(err.message || '预览失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleExportJson = async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, string> = { format: 'json' };
-      if (selectedStatus !== 'all') params.status = selectedStatus;
-      const data = await reportApi.export(params);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `secguard-report-${new Date().toISOString().substring(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err: any) { alert(err.message || '导出失败'); }
-    finally { setLoading(false); }
+    } finally { setLoading(false); }
   };
 
   const severityChartData = exportData?.items?.length
@@ -105,75 +111,112 @@ export default function ReportsPage() {
                   <h3 className="text-lg font-semibold text-white">筛选区域</h3>
                 </div>
                 <div className="space-y-4">
-                  {/* 数据来源 Tab 切换（含团队下拉） */}
+                  {/* 数据来源 Tab */}
                   {exportData && (
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">数据来源</label>
-                      <div className="flex bg-dark-bg rounded-lg p-1 space-x-1 relative">
+                      <div className="flex bg-dark-bg rounded-lg p-1 space-x-1">
                         {[
                           { key: 'all', label: `全部 (${exportData.items?.length || 0})`, icon: Layers },
-                          { key: 'personal', label: `👤 个人 (${personalCount})`, icon: User },
-                          { key: 'team', label: `🏢 团队 (${teamCount})`, icon: Building },
+                          { key: 'personal', label: `个人 (${personalCount})`, icon: User },
+                          { key: 'team', label: `团队 (${teamCount})`, icon: Building },
                         ].map(tab => (
-                          <button
-                            key={tab.key}
-                            onClick={() => setDataSource(tab.key as any)}
+                          <button key={tab.key} onClick={() => setDataSource(tab.key as any)}
                             className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center space-x-1 ${
-                              dataSource === tab.key
-                                ? 'bg-primary text-white shadow-sm'
-                                : 'text-gray-400 hover:text-white'
-                            }`}
-                          >
-                            <tab.icon className="w-3.5 h-3.5" />
-                            <span>{tab.label}</span>
+                              dataSource === tab.key ? 'bg-primary text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                            }`}>
+                            <tab.icon className="w-3.5 h-3.5" /><span>{tab.label}</span>
                           </button>
                         ))}
                       </div>
                     </div>
                   )}
+
+                  {/* 时间范围 */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">按状态筛选</label>
-                    <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
+                    <label className="block text-sm font-medium text-gray-300 mb-2">时间范围</label>
+                    <div className="flex bg-dark-bg rounded-lg p-1 space-x-1 mb-2">
+                      {[
+                        { key: '7d', label: '近7天' },
+                        { key: '30d', label: '近30天' },
+                        { key: 'all', label: '全部' },
+                        { key: 'custom', label: '自定义' },
+                      ].map(opt => (
+                        <button key={opt.key} onClick={() => setDateRange(opt.key as any)}
+                          className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
+                            dateRange === opt.key ? 'bg-primary text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                    {dateRange === 'custom' && (
+                      <div className="flex gap-2">
+                        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                          className="flex-1 px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary" />
+                        <span className="text-gray-500 self-center">—</span>
+                        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                          className="flex-1 px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 项目筛选 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">项目</label>
+                    <select value={selectedProject === 'all' ? 'all' : String(selectedProject)}
+                      onChange={(e) => setSelectedProject(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                       className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
-                      <option value="all">全部状态</option>
-                      <option value="pending">待分派</option><option value="processing">处理中</option>
-                      <option value="fixed">已修复</option><option value="reviewing">已复核</option>
-                      <option value="closed">已关闭</option>
+                      <option value="all">全部项目</option>
+                      {projects.map((p: any) => (
+                        <option key={p.id} value={String(p.id)}>{p.name}</option>
+                      ))}
                     </select>
+                  </div>
+
+                  {/* 严重度 + 状态 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">严重程度</label>
+                      <select value={selectedSeverity} onChange={(e) => setSelectedSeverity(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer text-sm">
+                        <option value="all">全部</option>
+                        <option value="critical">极危</option>
+                        <option value="high">高危</option>
+                        <option value="medium">中危</option>
+                        <option value="low">低危</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">状态</label>
+                      <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer text-sm">
+                        <option value="all">全部状态</option>
+                        <option value="pending">待分派</option><option value="processing">处理中</option>
+                        <option value="fixed">已修复</option><option value="reviewing">已复核</option>
+                        <option value="closed">已关闭</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
 
+              {/* 导出操作 */}
               <div className="bg-dark-card border border-dark-border rounded-xl p-6">
                 <div className="flex items-center space-x-2 mb-4">
                   <CheckSquare className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-semibold text-white">导出格式</h3>
+                  <h3 className="text-lg font-semibold text-white">导出操作</h3>
                 </div>
                 <div className="space-y-3">
-                  <button onClick={() => setExportFormat('pdf')}
-                    className={`w-full flex items-center space-x-3 p-3 rounded-lg text-sm transition-all ${
-                      exportFormat === 'pdf' ? 'bg-primary/10 border border-primary/50 text-primary' : 'bg-dark-bg text-gray-400 hover:text-white'
-                    }`}>
-                    <FileText className="w-5 h-5" /><span>HTML 报告 (.html)</span>
+                  <button onClick={() => handleExport('html')} disabled={downloading}
+                    className="w-full px-4 py-3 bg-dark-bg border border-dark-border text-gray-300 rounded-lg hover:bg-dark-hover transition-all flex items-center justify-center space-x-2 disabled:opacity-50">
+                    {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    <span>导出 HTML 报告</span>
                   </button>
-                  <button onClick={() => setExportFormat('html')}
-                    className={`w-full flex items-center space-x-3 p-3 rounded-lg text-sm transition-all ${
-                      exportFormat === 'html' ? 'bg-primary/10 border border-primary/50 text-primary' : 'bg-dark-bg text-gray-400 hover:text-white'
-                    }`}>
-                    <FileText className="w-5 h-5" /><span>HTML 网页 (.html)</span>
+                  <button onClick={() => handleExport('pdf')} disabled={downloading}
+                    className="w-full px-4 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/20 transition-all flex items-center justify-center space-x-2 disabled:opacity-50">
+                    {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    <span>导出 PDF 报告</span>
                   </button>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => handleDownloadFile('html')} disabled={downloading}
-                  className="px-4 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/20 transition-all flex items-center justify-center space-x-2 disabled:opacity-50">
-                  {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}<span>导出文件</span>
-                </button>
-                <button onClick={handleExportJson} disabled={loading}
-                  className="px-4 py-3 bg-dark-bg border border-dark-border text-gray-300 rounded-lg hover:bg-dark-hover transition-all flex items-center justify-center space-x-2 disabled:opacity-50">
-                  <Download className="w-4 h-4" /><span>导出 JSON</span>
-                </button>
               </div>
 
               <button onClick={handlePreview} disabled={loading}
@@ -215,15 +258,18 @@ export default function ReportsPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-dark-bg rounded-lg p-6">
-                        <p className="text-sm text-gray-400 mb-1">漏洞总数</p>
-                        <p className="text-3xl font-bold text-white">{exportData.summary?.total ?? 0}</p>
-                      </div>
-                      <div className="bg-dark-bg rounded-lg p-6">
-                        <p className="text-sm text-gray-400 mb-1">修复率</p>
-                        <p className="text-3xl font-bold text-green-400">{exportData.summary?.fix_rate ?? '0%'}</p>
-                      </div>
+                    <div className="grid grid-cols-4 gap-4">
+                      {[
+                        { label: '漏洞总数', value: exportData.summary?.total ?? 0 },
+                        { label: '修复率', value: exportData.summary?.fix_rate ?? '0%', color: 'text-green-400' },
+                        { label: '平均处理', value: exportData.summary?.avg_processing_days ?? '--' },
+                        { label: '超期未关', value: exportData.summary?.stale_count ?? 0, color: 'text-red-400' },
+                      ].map((s, i) => (
+                        <div key={i} className="bg-dark-bg rounded-lg p-6">
+                          <p className="text-sm text-gray-400 mb-1">{s.label}</p>
+                          <p className={`text-3xl font-bold ${s.color || 'text-white'}`}>{s.value}</p>
+                        </div>
+                      ))}
                     </div>
                     {severityChartData.length > 0 && (
                       <div className="bg-dark-bg rounded-lg p-6">
