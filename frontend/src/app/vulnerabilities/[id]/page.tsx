@@ -42,7 +42,7 @@ export default function VulnerabilityDetailPage() {
   const canAssign = isStaff || isTeamAdmin || isSecurityLead;
   const canFix = isStaff || (isAssignee && !isObserver) || (isDeveloper && isAssignee);
   const canReview = isStaff || isTeamAdmin || isSecurityLead || isReporter;
-  const canClose = isStaff || isTeamAdmin || isSecurityLead;
+  const canClose = isStaff || isTeamAdmin || isSecurityLead || (!hasTeam && isReporter);
 
   useEffect(() => {
     const fetch = async () => {

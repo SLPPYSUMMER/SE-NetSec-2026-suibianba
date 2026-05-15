@@ -1126,6 +1126,8 @@ def transition_status(request: HttpRequest, vuln_id: str, payload: StatusTransit
     elif payload.action in ('close', 'reopen'):
         if has_team and team_role not in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
             is_allowed = False
+        elif not has_team:
+            is_allowed = report.reporter == request.user
         else:
             is_allowed = True
 
