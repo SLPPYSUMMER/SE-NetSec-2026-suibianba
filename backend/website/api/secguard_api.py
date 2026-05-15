@@ -2371,12 +2371,37 @@ class TeamJoinSchema(BaseModel):
 
 @router.post("/teams/create")
 def team_create(request: HttpRequest, payload: TeamCreateSchema):
-    """创建新团队，创建者自动成为团队管理员"""
+    """
+    创建新团队，创建者自动成为团队管理员。
+    
+    [单团队模式] 每位用户只能属于一个团队，如需创建新团队请先退出当前团队。
+    """
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
+    
+    # [单团队模式] 检查用户是否已属于其他团队
+    try:
+        profile = request.user.userprofile
+        if profile.team:
+            existing_membership = TeamMembership.objects.filter(
+                user=request.user,
+                team=profile.team,
+                status=TeamMembership.Status.ACCEPTED
+            ).first()
+            if existing_membership:
+                raise HttpError(
+                    400, 
+                    f"您当前已属于团队 '{profile.team.name}'。"
+                    f"每位用户只能属于一个团队，如需创建新团队请先退出当前团队。"
+                )
+    except (UserProfile.DoesNotExist, Exception):
+        pass
+    
+    # 检查团队名称是否已被使用
     existing = Organization.objects.filter(name=payload.name, type="team").first()
     if existing:
         raise HttpError(400, f"团队名称 '{payload.name}' 已被使用")
+    
     import uuid
     team = Organization.objects.create(
         name=payload.name, type="team", admin=request.user,
@@ -2388,37 +2413,78 @@ def team_create(request: HttpRequest, payload: TeamCreateSchema):
         role=TeamMembership.Role.ADMIN,
         status=TeamMembership.Status.ACCEPTED,
     )
+    
+    # 设置用户的主团队
     profile = request.user.userprofile
-    if not profile.team:
-        profile.team = team
-        profile.role = "admin"
-        profile.save()
+    profile.team = team
+    profile.role = "admin"
+    profile.save()
 
     create_audit_log(user=request.user, action='TEAM_CREATED', target_type='Team',
                      target_id=str(team.id), detail=f"创建团队 {team.name}", request=request)
-    return {"success": True, "team_id": team.id, "team_name": team.name, "message": "团队创建成功"}
+    return {
+        "success": True, 
+        "team_id": team.id, 
+        "team_name": team.name, 
+        "message": "团队创建成功",
+        "mode": "single_team"  # 标识单团队模式
+    }
 
 
 
 @router.post("/teams/join")
 def team_join(request: HttpRequest, payload: TeamJoinSchema):
-    """申请加入已有团队"""
+    """
+    申请加入已有团队。
+    
+    [单团队模式] 每位用户只能属于一个团队，如需加入其他团队请先退出当前团队。
+    """
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
+    
+    # [单团队模式] 检查用户是否已属于其他团队
+    try:
+        profile = request.user.userprofile
+        if profile.team:
+            existing_membership = TeamMembership.objects.filter(
+                user=request.user,
+                team=profile.team,
+                status__in=[TeamMembership.Status.ACCEPTED, TeamMembership.Status.PENDING]
+            ).first()
+            if existing_membership:
+                status_text = "已加入" if existing_membership.status == TeamMembership.Status.ACCEPTED else "已申请"
+                raise HttpError(
+                    400,
+                    f"您{status_text}团队 '{profile.team.name}'。"
+                    f"每位用户只能属于一个团队，如需加入其他团队请先退出当前团队。"
+                )
+    except (UserProfile.DoesNotExist, Exception):
+        pass
+    
+    # 验证目标团队是否存在
     team = Organization.objects.filter(id=payload.team_id, type="team").first()
     if not team:
         raise HttpError(400, "指定的团队不存在")
+    
+    # 检查是否已经申请过该团队
     already = TeamMembership.objects.filter(user=request.user, team=team).first()
     if already:
         raise HttpError(400, "您已申请过该团队或已在团队中")
+    
+    # 创建加入申请
     TeamMembership.objects.create(
         user=request.user, team=team,
         role=TeamMembership.Role.DEVELOPER,
         status=TeamMembership.Status.PENDING,
     )
+    
     create_audit_log(user=request.user, action='TEAM_JOIN_REQUEST', target_type='Team',
                      target_id=str(team.id), detail=f"申请加入团队 {team.name}", request=request)
-    return {"success": True, "message": "申请已提交，请等待团队管理员审核"}
+    return {
+        "success": True, 
+        "message": "申请已提交，请等待团队管理员审核",
+        "mode": "single_team"  # 标识单团队模式
+    }
 
 
 class HandleMemberSchema(BaseModel):
@@ -2443,6 +2509,230 @@ def list_teams(request: HttpRequest, search: Optional[str] = Query(None)):
             "admin_name": t.admin.username if t.admin else None,
         })
     return {"items": result}
+
+
+class TeamLeaveSchema(BaseModel):
+    team_id: Optional[int] = Field(None, description="要退出的团队ID（可选，默认退出当前团队）")
+    confirm: bool = Field(True, description="确认退出")
+
+
+@router.post("/teams/leave")
+def team_leave(request: HttpRequest, payload: TeamLeaveSchema):
+    """
+    退出当前团队。
+    
+    [单团队模式] 退出后用户将变为无团队状态，可以创建或加入新团队。
+    注意：如果是团队最后一个管理员，需要先转让管理员权限或解散团队。
+    """
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    if not payload.confirm:
+        raise HttpError(400, "请确认退出操作")
+    
+    # 获取要退出的团队
+    try:
+        profile = request.user.userprofile
+        
+        if payload.team_id:
+            # 指定了团队ID
+            team = Organization.objects.filter(id=payload.team_id, type="team").first()
+            if not team:
+                raise HttpError(400, "指定的团队不存在")
+        else:
+            # 退出当前主团队
+            team = profile.team
+            
+        if not team:
+            raise HttpError(400, "您当前不属于任何团队")
+        
+        # 查找成员关系
+        membership = TeamMembership.objects.filter(
+            user=request.user,
+            team=team,
+            status=TeamMembership.Status.ACCEPTED
+        ).first()
+        
+        if not membership:
+            raise HttpError(400, "您不是该团队的成员")
+        
+        # 检查是否是唯一管理员
+        if membership.role == TeamMembership.Role.ADMIN:
+            admin_count = TeamMembership.objects.filter(
+                team=team,
+                role=TeamMembership.Role.ADMIN,
+                status=TeamMembership.Status.ACCEPTED
+            ).count()
+            
+            if admin_count <= 1:
+                raise HttpError(
+                    400,
+                    f"您是团队 '{team.name}' 的唯一管理员。"
+                    f"退出前请先将管理员权限转让给其他成员，或解散团队。"
+                )
+        
+        # 使用事务确保数据一致性
+        from django.db import transaction
+        with transaction.atomic():
+            # 删除成员关系
+            membership.delete()
+            
+            # 清除用户的主团队字段
+            if profile.team == team:
+                profile.team = None
+                profile.role = ""
+                profile.save()
+            
+            # 如果用户是该团队的管理员，从managers中移除
+            team.managers.remove(request.user)
+    
+        create_audit_log(
+            user=request.user, 
+            action='TEAM_LEFT', 
+            target_type='Team',
+            target_id=str(team.id), 
+            detail=f"退出团队 {team.name}", 
+            request=request
+        )
+        
+        return {
+            "success": True,
+            "message": f"已成功退出团队 '{team.name}'",
+            "left_team_id": team.id,
+            "left_team_name": team.name,
+            "mode": "single_team"
+        }
+        
+    except UserProfile.DoesNotExist:
+        raise HttpError(400, "用户信息不完整")
+    except HttpError:
+        raise
+    except Exception as e:
+        logger.error(f"退出团队失败: {e}")
+        raise HttpError(500, f"退出团队失败: {str(e)}")
+
+
+@router.get("/teams/my-team")
+def get_my_team(request: HttpRequest):
+    """
+    获取当前用户的团队信息。
+    
+    返回用户所属的团队详情、角色和成员列表。
+    """
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    
+    try:
+        profile = request.user.userprofile
+        
+        if not profile.team:
+            return {
+                "has_team": False,
+                "message": "您当前不属于任何团队",
+                "mode": "single_team"
+            }
+        
+        team = profile.team
+        membership = TeamMembership.objects.filter(
+            user=request.user,
+            team=team,
+            status=TeamMembership.Status.ACCEPTED
+        ).select_related('team').first()
+        
+        if not membership:
+            return {
+                "has_team": False,
+                "message": "团队成员关系异常",
+                "mode": "single_team"
+            }
+        
+        # 获取团队成员列表
+        members = TeamMembership.objects.filter(
+            team=team,
+            status=TeamMembership.Status.ACCEPTED
+        ).select_related('user')[:50]
+        
+        member_list = []
+        for m in members:
+            member_list.append({
+                "user_id": m.user.id,
+                "username": m.user.username,
+                "email": m.user.email,
+                "role": m.role,
+                "role_label": m.get_role_display(),
+                "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+                "is_self": m.user.id == request.user.id
+            })
+        
+        return {
+            "has_team": True,
+            "team": {
+                "id": team.id,
+                "name": team.name,
+                "created": team.created.isoformat() if team.created else None,
+                "admin_name": team.admin.username if team.admin else None,
+                "member_count": len(member_list)
+            },
+            "membership": {
+                "role": membership.role,
+                "role_label": membership.get_role_display(),
+                "joined_at": membership.joined_at.isoformat() if membership.joined_at else None
+            },
+            "members": member_list,
+            "mode": "single_team"
+        }
+        
+    except UserProfile.DoesNotExist:
+        return {
+            "has_team": False,
+            "message": "用户信息不完整",
+            "mode": "single_team"
+        }
+    except Exception as e:
+        logger.error(f"获取团队信息失败: {e}")
+        raise HttpError(500, f"获取团队信息失败: {str(e)}")
+
+
+# ==================== 漏洞和资产删除功能 ====================
+
+class ReportDeleteSchema(BaseModel):
+    """漏洞删除请求"""
+    report_ids: List[int] = Field(..., description="要删除的漏洞ID列表")
+
+    @validator('report_ids', pre=True, always=True)
+    def validate_report_ids(cls, v):
+        if not isinstance(v, list):
+            raise ValueError('report_ids 必须是列表')
+        validated_ids = []
+        for item in v:
+            if isinstance(item, int):
+                validated_ids.append(item)
+            elif isinstance(item, str):
+                try:
+                    validated_ids.append(int(item))
+                except (ValueError, TypeError):
+                    continue
+        return validated_ids
+
+
+class AssetDeleteSchema(BaseModel):
+    """资产删除请求"""
+    asset_ids: List[int] = Field(..., description="要删除的资产ID列表")
+
+    @validator('asset_ids', pre=True, always=True)
+    def validate_asset_ids(cls, v):
+        if not isinstance(v, list):
+            raise ValueError('asset_ids 必须是列表')
+        validated_ids = []
+        for item in v:
+            if isinstance(item, int):
+                validated_ids.append(item)
+            elif isinstance(item, str):
+                try:
+                    validated_ids.append(int(item))
+                except (ValueError, TypeError):
+                    continue
+        return validated_ids
 
 
 def check_delete_permission(request: HttpRequest, obj) -> bool:
