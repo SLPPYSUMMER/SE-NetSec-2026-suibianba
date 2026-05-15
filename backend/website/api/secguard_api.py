@@ -2105,6 +2105,7 @@ class ExportSchema(BaseModel):
     format: str = Field("pdf", description="导出格式: pdf/html")
     project_id: Optional[int] = Field(None, description="项目筛选")
     status: Optional[str] = Field(None, description="状态筛选")
+    severity: Optional[str] = Field(None, description="严重程度筛选: critical/high/medium/low")
     date_from: Optional[str] = Field(None, description="开始日期 (YYYY-MM-DD)")
     date_to: Optional[str] = Field(None, description="结束日期 (YYYY-MM-DD)")
 
@@ -2120,6 +2121,8 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
         queryset = queryset.filter(project_id=payload.project_id)
     if payload.status:
         queryset = queryset.filter(status=payload.status)
+    if payload.severity:
+        queryset = queryset.filter(severity=payload.severity)
     if payload.date_from:
         queryset = queryset.filter(created_at__gte=payload.date_from)
     if payload.date_to:
@@ -2134,6 +2137,55 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
     reviewing = queryset.filter(status=Report.Status.REVIEWING).count()
     closed = queryset.filter(status=Report.Status.CLOSED).count()
     fix_rate = f"{(fixed + closed) / total * 100:.1f}%" if total > 0 else "0%"
+
+    # 处理时长统计
+    from datetime import timedelta
+    now = timezone.now()
+    avg_days_str = "--"
+    longest_pending_str = "--"
+    stale_count = 0
+
+    # 已完成漏洞平均处理天数
+    done_qs = queryset.filter(status__in=[Report.Status.FIXED, Report.Status.CLOSED])
+    if done_qs.exists():
+        total_days = sum(
+            ((now - r.created_at).total_seconds() / 86400) for r in done_qs
+        )
+        avg_days_str = f"{total_days / done_qs.count():.1f}天"
+
+    # 最长未处理
+    oldest = queryset.filter(status__in=[Report.Status.PENDING, Report.Status.PROCESSING]).order_by('created_at').first()
+    if oldest:
+        days = (now - oldest.created_at).days
+        longest_pending_str = f"{days}天 ({oldest.vuln_id})"
+
+    # 超期未关（>7天）
+    stale_count = queryset.filter(
+        status__in=[Report.Status.PENDING, Report.Status.PROCESSING],
+        created_at__lt=now - timedelta(days=7)
+    ).count()
+
+    # 按严重度修复率
+    sev_fix_rates = {}
+    for sev in ['critical', 'high', 'medium', 'low']:
+        sev_total = queryset.filter(severity=sev).count()
+        if sev_total > 0:
+            sev_fixed = queryset.filter(severity=sev, status__in=[Report.Status.FIXED, Report.Status.CLOSED]).count()
+            sev_fix_rates[sev] = {"total": sev_total, "fixed": sev_fixed, "rate": f"{sev_fixed / sev_total * 100:.1f}%"}
+        else:
+            sev_fix_rates[sev] = {"total": 0, "fixed": 0, "rate": "--"}
+
+    # 分析段数据
+    project_count = queryset.values('project').distinct().count()
+    high_critical_count = queryset.filter(severity__in=['critical', 'high']).count()
+    high_critical_pct = f"{high_critical_count / total * 100:.1f}%" if total > 0 else "0%"
+    top_project = None
+    if total > 0:
+        top_project = queryset.values('project__name').annotate(c=Count('id')).order_by('-c').first()
+    top_reporter = None
+    if total > 0:
+        top_reporter = queryset.values('reporter__username').annotate(c=Count('id')).order_by('-c').first()
+    crit_fix_rate = sev_fix_rates.get('critical', {}).get('rate', '--')
 
     sev_map = {"critical": "严重", "high": "高危", "medium": "中危", "low": "低危"}
     sta_map = {"pending": "待分派", "processing": "处理中", "fixed": "已修复", "reviewing": "已复核", "closed": "已关闭"}
