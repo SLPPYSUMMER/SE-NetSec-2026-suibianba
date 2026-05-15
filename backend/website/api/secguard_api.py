@@ -100,6 +100,7 @@ class ReportCreateSchema(BaseModel):
     reproduction_steps: Optional[str] = Field(None, description="复现步骤")
     impact_scope: Optional[str] = Field(None, description="影响范围")
     assignee_id: Optional[int] = Field(None, description="指派处理人ID")
+    personal: bool = Field(False, description="以个人身份提交（不关联团队）")
 
     @validator('severity')
     def validate_severity(cls, v):
@@ -737,7 +738,7 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         reporter=request.user,
         assignee=assignee,
         project=project,
-        team=set_request_team(request),
+        team=None if payload.personal else set_request_team(request),
         cve_id=payload.cve_id or "",
         affected_url=payload.affected_url or "",
         reproduction_steps=payload.reproduction_steps or "",

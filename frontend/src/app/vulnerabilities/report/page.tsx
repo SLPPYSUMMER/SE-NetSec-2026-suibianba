@@ -25,6 +25,7 @@ export default function ReportVulnerabilityPage() {
     cve_id: '',
     project_id: 1,
     assignee_id: 0,
+    personal: false,
   });
 
   const { user } = useAuth();
@@ -109,6 +110,19 @@ export default function ReportVulnerabilityPage() {
 
           <form onSubmit={handleSubmit} className="max-w-4xl mx-auto bg-dark-card border border-dark-border rounded-xl p-8 space-y-6">
             {error && <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg text-sm">{error}</div>}
+
+            {hasTeam && (
+              <div className="flex items-center space-x-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" checked={formData.personal} onChange={(e) => update('personal', e.target.checked)}
+                    className="sr-only peer" />
+                  <div className="w-11 h-6 bg-dark-border rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:bg-primary after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                </label>
+                <span className="text-sm text-gray-300">
+                  {formData.personal ? '个人漏洞（不关联团队）' : '提交到团队'}
+                </span>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">漏洞标题 *</label>
