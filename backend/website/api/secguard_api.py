@@ -2357,6 +2357,16 @@ _TYPE_LABEL_MAP = {
 }
 
 
+@router.get("/projects")
+def list_projects(request: HttpRequest):
+    """列出所有项目，供报告导出筛选使用"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+    from website.models import Project
+    projects = Project.objects.all()
+    return [{"id": p.id, "name": p.name} for p in projects]
+
+
 @router.get("/assets")
 def list_assets(request: HttpRequest):
     if not request.user.is_authenticated:
