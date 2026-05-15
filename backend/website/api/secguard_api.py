@@ -1397,16 +1397,18 @@ class AttachmentSchema(BaseModel):
 
 
 def check_report_access(request: HttpRequest, report):
-    """检查用户是否有权访问指定报告。staff 可访问全部，普通用户只能访问自己团队或自己上报的"""
+    """检查用户是否有权访问指定报告。staff 可访问全部，普通用户按角色分层"""
     if request.user.is_staff:
         return
     if report.reporter == request.user:
         return
+    if report.assignee == request.user:
+        return
     if report.team:
-        team, _ = get_user_team(request)
-        if team and team == report.team:
+        team_role, has_team = get_user_team_role(request, team=report.team)
+        if has_team and team_role in (TeamMembership.Role.ADMIN, TeamMembership.Role.TEAM_LEAD):
             return
-    raise HttpError(403, "无权访问此漏洞报告，请确认当前团队状态是否正常或联系团队管理员")
+    raise HttpError(403, "无权访问此漏洞报告")
 
 
 @router.post("/reports/{vuln_id}/attachments")

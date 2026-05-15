@@ -5,7 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { scansApi, teamsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Plus, Play, Globe, Filter, Upload, ChevronLeft, ChevronRight, Activity, Loader2, Settings2, ChevronUp, Trash2, XCircle, RotateCw, CheckSquare, User, Building, Layers } from 'lucide-react';
+import { Search, Plus, Play, Globe, Filter, Upload, ChevronDown, ChevronLeft, ChevronRight, Activity, Loader2, Settings2, ChevronUp, Trash2, XCircle, RotateCw, CheckSquare, User, Building, Layers } from 'lucide-react';
 
 const MODULE_GROUPS: Record<string, string[]> = {
   "端口扫描": ["port_scan", "icmp_scan"],
@@ -97,16 +97,6 @@ export default function ScansPage() {
     };
     loadTeam();
   }, []);
-        teams.forEach((team, index) => {
-          console.log(`  ${index + 1}. ${team.team_name} (ID: ${team.team_id}, 状态: ${team.status})`);
-        });
-
-      } catch (err) {
-        console.error('❌ [DEBUG] 加载团队列表失败:', err);
-      }
-    };
-    loadTeams();
-  }, []);
 
   // 监听团队切换，自动重置数据源过滤状态
   const prevTeamIdRef = useRef<number | null>(null);
@@ -114,8 +104,6 @@ export default function ScansPage() {
     if (prevTeamIdRef.current !== null && prevTeamIdRef.current !== user?.team_id) {
       console.log('🔄 [DEBUG] 检测到团队切换:', prevTeamIdRef.current, '→', user?.team_id);
       setDataSource('all');
-      setSelectedTeamIds(new Set());
-      setShowTeamDropdown(false);
       setPage(1);
       setSelectedIds(new Set());
       fetchScans(true);

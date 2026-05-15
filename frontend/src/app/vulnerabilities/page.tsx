@@ -19,7 +19,7 @@ export default function VulnerabilitiesPage() {
   const [total, setTotal] = useState(0);
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
   const [userTeams, setUserTeams] = useState<any[]>([]);  // [单团队模式]
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set>());  // 选中的漏洞ID
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set<string>());  // 选中的漏洞ID
   const [batchDeleting, setBatchDeleting] = useState(false);  // 批量删除状态
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState('desc');
