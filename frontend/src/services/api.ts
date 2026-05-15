@@ -85,7 +85,7 @@ export const reportApi = {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `secguard-report-${new Date().toISOString().substring(0, 10)}.${params?.format === 'html' ? 'html' : 'html'}`;
+      a.download = `secguard-report-${new Date().toISOString().substring(0, 10)}.${params?.format === 'pdf' ? 'pdf' : 'html'}`;
       a.click();
       URL.revokeObjectURL(url);
       return { items: [], total_count: 0, summary: {} };
