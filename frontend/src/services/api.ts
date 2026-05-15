@@ -201,6 +201,8 @@ export const teamsApi = {
     request<any>('/teams/leave', { method: 'POST' }),
   dissolve: () =>
     request<any>('/teams/dissolve', { method: 'POST' }),
+  getMyTeam: () =>
+    request<{ has_team: boolean; team?: any; membership?: any; members?: any[]; message?: string; mode?: string }>('/teams/my-team'),
 };
 
 export const attachmentApi = {

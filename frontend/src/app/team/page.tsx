@@ -230,9 +230,25 @@ export default function TeamPage() {
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* 单团队模式提示 */}
+            <div className="lg:col-span-2 bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+              <div className="flex items-start space-x-3">
+                <AlertTriangle className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm text-blue-300 font-medium">单团队模式说明</p>
+                  <ul className="text-xs text-blue-200/80 mt-2 space-y-1 list-disc list-inside">
+                    <li>每位用户只能属于<strong className="text-blue-300">一个团队</strong></li>
+                    <li>加入或创建新团队前，需先退出当前团队</li>
+                    <li>退出后可以随时创建或加入其他团队</li>
+                    <li>所有漏洞报告、扫描任务等数据将按团队隔离</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-dark-card border border-dark-border rounded-xl p-6">
               <div className="flex items-center space-x-2 mb-4"><Building className="w-5 h-5 text-primary" /><h3 className="text-lg font-semibold text-white">创建团队</h3></div>
-              <p className="text-xs text-gray-500 mb-3">创建后您将自动成为团队管理员</p>
+              <p className="text-xs text-gray-500 mb-3">创建后您将自动成为团队管理员。每位用户只能拥有一个团队。</p>
               <div className="flex space-x-3">
                 <input type="text" value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="输入团队名称" onKeyDown={(e) => e.key === 'Enter' && handleCreateTeam()}
                   className="flex-1 px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-primary transition-colors" />
@@ -241,7 +257,7 @@ export default function TeamPage() {
             </div>
             <div className="bg-dark-card border border-dark-border rounded-xl p-6">
               <div className="flex items-center space-x-2 mb-4"><Search className="w-5 h-5 text-primary" /><h3 className="text-lg font-semibold text-white">加入团队</h3></div>
-              <p className="text-xs text-gray-500 mb-3">输入团队ID申请加入，等待管理员审核</p>
+              <p className="text-xs text-gray-500 mb-3">输入团队ID申请加入，等待管理员审核。每位用户只能属于一个团队。</p>
               <div className="flex space-x-3">
                 <input type="text" value={joinTeamId} onChange={(e) => setJoinTeamId(e.target.value)} placeholder="输入团队ID" onKeyDown={(e) => e.key === 'Enter' && handleJoinTeam()}
                   className="flex-1 px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-primary transition-colors" />
@@ -260,18 +276,19 @@ export default function TeamPage() {
       <main className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div><h1 className="text-3xl font-bold text-white">团队管理</h1><p className="text-sm text-gray-400 mt-1">{user.team_name} — ID: <span className="text-primary font-mono">{user.team_id}</span> — 您的角色: {user.role}</p></div>
-          {myTeams.length > 1 && (
-            <div className="flex items-center space-x-2">
-              <ArrowLeftRight className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-400">切换团队:</span>
-              <select value={user.team_id || ''} onChange={(e) => handleSwitchTeam(parseInt(e.target.value))} disabled={switching}
-                className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-white cursor-pointer">
-                {myTeams.map((t: any) => (
-                  <option key={t.team_id} value={t.team_id}>{t.team_name} ({t.role_label}){t.is_active ? ' ←' : ''}</option>
-                ))}
-              </select>
+          
+          {/* 单团队模式：移除切换团队功能 */}
+        </div>
+
+        {/* 单团队模式信息提示 */}
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+          <div className="flex items-start space-x-3">
+            <AlertTriangle className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm text-blue-300 font-medium">单团队模式</p>
+              <p className="text-xs text-blue-200/80 mt-1">您当前属于团队 <strong className="text-blue-300">{user.team_name}</strong>。如需加入其他团队，请先退出当前团队。</p>
             </div>
-          )}
+          </div>
         </div>
 
         {hasPendingInvite && (
