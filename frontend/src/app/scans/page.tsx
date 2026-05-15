@@ -432,9 +432,9 @@ export default function ScansPage() {
                       className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer"
                     >
                       <option value="">-- 选择团队 --</option>
-                      {userTeams.filter((t: any) => t.status === 'accepted').map((team: any) => (
-                        <option key={team.team_id} value={team.team_id}>
-                          {team.team_name} ({team.role_label})
+                      {userTeams.map((team: any) => (
+                        <option key={team.id} value={team.id}>
+                          {team.name}
                         </option>
                       ))}
                     </select>
