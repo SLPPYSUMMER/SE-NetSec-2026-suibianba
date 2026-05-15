@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { assetsApi, teamsApi } from '@/services/api';
+import { assetsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Trash2 } from 'lucide-react';
 
@@ -33,7 +33,6 @@ export default function AssetsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
-  const [userTeams, setUserTeams] = useState<any[]>([]);  // [单团队模式] 只存储当前唯一团队
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());  // 选中的资产ID
   const [batchDeleting, setBatchDeleting] = useState(false);  // 批量删除状态
 
@@ -48,24 +47,6 @@ export default function AssetsPage() {
   };
 
   useEffect(() => { fetchAssets(); }, []);
-
-  // [单团队模式] 加载用户的当前团队信息
-  useEffect(() => {
-    const loadTeam = async () => {
-      try {
-        const data = await teamsApi.getMyTeam();
-        if (data.has_team && data.team) {
-          setUserTeams([data.team]);  // 单团队模式下只有一个团队
-        } else {
-          setUserTeams([]);
-        }
-      } catch (err) {
-        console.error('加载团队信息失败:', err);
-        setUserTeams([]);
-      }
-    };
-    loadTeam();
-  }, []);
 
   // 监听团队切换，自动重置数据源过滤状态
   const prevTeamIdRef = useRef<number | null>(null);

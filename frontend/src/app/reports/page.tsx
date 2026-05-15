@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { reportApi, teamsApi, SEVERITY_MAP } from '@/services/api';
+import { reportApi, SEVERITY_MAP } from '@/services/api';
 import { Filter, TrendingUp, Clock, FileText, Download, Eye, CheckSquare, Loader2, User, Building, Layers } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -15,25 +15,8 @@ export default function ReportsPage() {
   const [previewMode, setPreviewMode] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
-  const [userTeams, setUserTeams] = useState<any[]>([]);  // [单团队模式]
 
-  // [单团队模式] 加载用户的当前团队信息
-  useEffect(() => {
-    const loadTeam = async () => {
-      try {
-        const data = await teamsApi.getMyTeam();
-        if (data.has_team && data.team) {
-          setUserTeams([data.team]);
-        } else {
-          setUserTeams([]);
-        }
-      } catch (err) {
-        console.error('加载团队信息失败:', err);
-        setUserTeams([]);
-      }
-    };
-    loadTeam();
-  }, []);
+  // [单团队模式] 数据过滤逻辑已简化，无需加载团队列表
 
   const handleDownloadFile = async (format: string) => {
     setDownloading(true);

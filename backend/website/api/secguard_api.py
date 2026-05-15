@@ -3020,7 +3020,14 @@ def decline_invite(request: HttpRequest):
 
 @router.post("/teams/switch")
 def switch_team(request: HttpRequest):
-    """切换当前活跃团队"""
+    """
+    [已废弃 - 单团队模式] 切换当前活跃团队。
+    
+    ⚠️ 注意：此接口在单团队模式下已不再使用！
+    每位用户只能属于一个团队，无需切换功能。
+    
+    保留此接口仅用于向后兼容，建议使用 /teams/my-team 替代。
+    """
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
     from pydantic import BaseModel as PydanticBase
@@ -3043,7 +3050,14 @@ def switch_team(request: HttpRequest):
 
 @router.get("/teams/my-teams")
 def my_teams(request: HttpRequest):
-    """列出当前用户所在的所有团队（含数据统计，包含待审批）"""
+    """
+    [已废弃 - 单团队模式] 列出当前用户所在的所有团队（含数据统计，包含待审批）。
+    
+    ⚠️ 注意：此接口在单团队模式下已不再使用！
+    每位用户只能属于一个团队，此接口返回的数据与 /teams/my-team 相同。
+    
+    保留此接口仅用于向后兼容，建议使用 /teams/my-team 替代。
+    """
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
     # 查询所有状态的团队（ACCEPTED + PENDING）
