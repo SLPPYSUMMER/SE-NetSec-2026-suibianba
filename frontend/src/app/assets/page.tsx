@@ -160,12 +160,13 @@ export default function AssetsPage() {
     }
   };
 
-  // 切换全选
+  // 切换全选（仅可选有实际资产的条目）
   const toggleSelectAll = () => {
-    if (selectedIds.size === filteredAssets.length && filteredAssets.length > 0) {
+    const deletable = filteredAssets.filter(a => (a.sub_assets || []).length > 0);
+    if (selectedIds.size === deletable.length && deletable.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredAssets.map(a => a.id)));
+      setSelectedIds(new Set(deletable.map(a => a.id)));
     }
   };
 
@@ -371,7 +372,7 @@ export default function AssetsPage() {
               <thead className="bg-dark-bg/50">
                 <tr>
                   <th className="w-12 px-3 py-4">
-                    <input type="checkbox" checked={selectedIds.size === filteredAssets.length && filteredAssets.length > 0}
+                    <input type="checkbox" checked={(selectedIds.size === filteredAssets.filter(a => (a.sub_assets || []).length > 0).length) && filteredAssets.some(a => (a.sub_assets || []).length > 0)}
                       onChange={toggleSelectAll} className="rounded bg-dark-bg border-dark-border accent-primary" />
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">资产信息</th>
@@ -404,13 +405,15 @@ export default function AssetsPage() {
                         onClick={() => subAssets.length > 0 && toggleExpand(asset.id)}>
                         <td className="px-3 py-4" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center space-x-2">
-                            <input type="checkbox" checked={selectedIds.has(asset.id)}
-                              onChange={() => setSelectedIds(prev => {
-                                const next = new Set(prev);
-                                next.has(asset.id) ? next.delete(asset.id) : next.add(asset.id);
-                                return next;
-                              })}
-                              className="rounded bg-dark-bg border-dark-border accent-primary" />
+                            {subAssets.length > 0 && (
+                              <input type="checkbox" checked={selectedIds.has(asset.id)}
+                                onChange={() => setSelectedIds(prev => {
+                                  const next = new Set(prev);
+                                  next.has(asset.id) ? next.delete(asset.id) : next.add(asset.id);
+                                  return next;
+                                })}
+                                className="rounded bg-dark-bg border-dark-border accent-primary" />
+                            )}
                             {subAssets.length > 0 && (
                               isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />
                             )}
@@ -484,10 +487,12 @@ export default function AssetsPage() {
                           <span className="text-sm text-gray-400">{asset.last_scan?.substring(0, 10) || '--'}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => handleDelete(asset.url, asset.id)}
-                            className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {subAssets.length > 0 && (
+                            <button onClick={() => handleDelete(asset.url, asset.id)}
+                              className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                       {/* 展开子资产 */}
