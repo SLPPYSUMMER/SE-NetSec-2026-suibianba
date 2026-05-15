@@ -714,6 +714,9 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
         except User.DoesNotExist:
             raise HttpError(400, f"被分派的用户ID {payload.assignee_id} 不存在")
 
+    if payload.personal and not assignee:
+        assignee = request.user
+
     duplicate_result = check_report_duplicates(
         title=payload.title,
         description=payload.description,
