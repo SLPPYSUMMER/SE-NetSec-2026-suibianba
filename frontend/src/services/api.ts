@@ -142,20 +142,23 @@ export const scansApi = {
   retry: (id: number) =>
     request<any>(`/scans/${id}/retry`, { method: 'POST' }),
   batchDelete: (ids: (number | string)[]) =>
-    request<{ success: boolean; deleted: number; skipped: number; message: string }>('/scans/batch', {
-      method: 'DELETE',
-      body: JSON.stringify({ scan_ids: ids.map(id => typeof id === 'string' ? parseInt(id, 10) : id).filter(id => !isNaN(id)) })
+    request<{ success: boolean; deleted: number; skipped: number; message: string }>('/scans/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ scan_ids: ids.map(Number).filter(id => !isNaN(id)) })
     }),
 };
 
 export const assetsApi = {
   list: () => request<{ items: any[]; total_count: number }>('/assets'),
-  delete: (id: number) =>
-    request<{ success: boolean; message: string }>(`/assets/${id}`, { method: 'DELETE' }),
-  batchDelete: (ids: (number | string)[]) =>
+  delete: (target: string) =>
     request<{ success: boolean; deleted: number; skipped: number; message: string }>('/assets/batch-delete', {
       method: 'POST',
-      body: JSON.stringify({ asset_ids: ids.map(id => typeof id === 'string' ? parseInt(id, 10) : id).filter(id => !isNaN(id)) })
+      body: JSON.stringify({ targets: [target] })
+    }),
+  batchDelete: (targets: string[]) =>
+    request<{ success: boolean; deleted: number; skipped: number; message: string }>('/assets/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ targets })
     }),
 };
 
@@ -170,7 +173,7 @@ export const reportsApi = {
   batchDelete: (ids: (number | string)[]) =>
     request<{ success: boolean; deleted: number; skipped: number; message: string }>('/reports/batch-delete', {
       method: 'POST',
-      body: JSON.stringify({ report_ids: ids.map(id => typeof id === 'string' ? parseInt(id, 10) : id).filter(id => !isNaN(id)) })
+      body: JSON.stringify({ report_ids: ids.map(String) })
     }),
 };
 

@@ -116,6 +116,16 @@ class ReportCreateSchema(BaseModel):
         return v
 
 
+class ReportDeleteSchema(BaseModel):
+    """漏洞批量删除请求"""
+    report_ids: List[str] = Field(..., description="要删除的漏洞ID列表")
+
+
+class AssetDeleteSchema(BaseModel):
+    """资产批量删除请求"""
+    targets: List[str] = Field(..., description="要删除的资产目标URL列表")
+
+
 class ReportUpdateSchema(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
@@ -244,11 +254,14 @@ def create_audit_log(user, action: str, target_type: str, target_id: str,
         ).first()
         if membership:
             team = membership.team
+    tid = str(target_id)
+    if len(tid) > 50:
+        tid = tid[:47] + '...'
     AuditLog.objects.create(
         user=user,
         action=action,
         target_type=target_type,
-        target_id=str(target_id),
+        target_id=tid,
         detail=detail,
         ip_address=ip_address,
         team=team,
@@ -870,6 +883,49 @@ def list_reports(
         "total_count": total_count,
         "page": page,
         "per_page": per_page,
+    }
+
+
+@router.post("/reports/batch-delete")
+def batch_delete_reports(request: HttpRequest, payload: ReportDeleteSchema):
+    """批量删除漏洞报告"""
+    if not request.user.is_authenticated:
+        raise HttpError(400, "请先登录")
+
+    if not payload.report_ids:
+        raise HttpError(400, "请提供要删除的漏洞 ID 列表")
+
+    queryset = Report.objects.filter(vuln_id__in=[str(id) for id in payload.report_ids])
+
+    deletable_ids = []
+    forbidden_count = 0
+    for report in queryset:
+        if check_delete_permission(request, report):
+            deletable_ids.append(report.vuln_id)
+        else:
+            forbidden_count += 1
+
+    count, _ = Report.objects.filter(vuln_id__in=deletable_ids).delete()
+
+    message = f"成功删除 {count} 个漏洞"
+    if forbidden_count > 0:
+        message += f"，{forbidden_count} 个因权限不足被跳过"
+
+    audit_target_id = ', '.join(map(str, payload.report_ids))
+    if len(audit_target_id) > 50:
+        audit_target_id = audit_target_id[:47] + '...'
+
+    AuditLog.objects.create(
+        user=request.user, action='BATCH_REPORTS_DELETED', target_type='Report',
+        target_id=audit_target_id,
+        detail=f"批量删除漏洞: {count}个成功",
+    )
+
+    return {
+        "success": True,
+        "deleted": count,
+        "skipped": forbidden_count,
+        "message": message
     }
 
 
@@ -1542,22 +1598,6 @@ def api_statistics_overview(request: HttpRequest):
     }
 
 
-@router.delete("/reports/{vuln_id}")
-def delete_report(request: HttpRequest, vuln_id: str):
-    if not request.user.is_authenticated:
-        raise HttpError(400, "请先登录")
-    try:
-        report = Report.objects.get(vuln_id=vuln_id)
-    except Report.DoesNotExist:
-        raise HttpError(400, f"漏洞报告 {vuln_id} 不存在")
-    if report.reporter != request.user and not request.user.is_staff:
-        raise HttpError(400, "只有上报人或管理员可以删除此漏洞报告")
-    report.delete()
-    create_audit_log(user=request.user, action='DELETE_REPORT', target_type='Report',
-                     target_id=vuln_id, detail=f"删除漏洞报告 {vuln_id}", request=request)
-    return {"success": True, "message": f"漏洞报告 {vuln_id} 已删除"}
-
-
 class ScanTaskOut(BaseModel):
     id: int
     scan_id: str
@@ -1748,7 +1788,7 @@ class BatchDeleteSchema(BaseModel):
         return validated_ids
 
 
-@router.delete("/scans/batch")
+@router.post("/scans/batch-delete")
 def batch_delete_scans(request: HttpRequest, payload: BatchDeleteSchema):
     """批量删除扫描任务（排除运行中的）"""
     if not request.user.is_authenticated:
@@ -2223,11 +2263,11 @@ def list_assets(request: HttpRequest):
         affected_urls = Report.objects.filter(team=team).exclude(affected_url="").values('affected_url').distinct()
 
     for s in scan_targets:
-        url = s['target']
+        url = (s['target'] or '').strip()
         if url and url not in assets_by_target:
             assets_by_target[url] = {"target": url, "sub_assets": [], "types": set(), "last_scan": None}
     for r in affected_urls:
-        url = r['affected_url']
+        url = (r['affected_url'] or '').strip()
         if url and url not in assets_by_target:
             assets_by_target[url] = {"target": url, "sub_assets": [], "types": set(), "last_scan": None}
 
@@ -2752,38 +2792,42 @@ def delete_report(request: HttpRequest, vuln_id: str):
     return {"success": True, "message": f"漏洞 '{report_title}' 已删除"}
 
 
-@router.post("/reports/batch-delete")
-def batch_delete_reports(request: HttpRequest, payload: ReportDeleteSchema):
-    """批量删除漏洞报告"""
+@router.post("/assets/batch-delete")
+def batch_delete_assets(request: HttpRequest, payload: AssetDeleteSchema):
+    """批量删除资产（按目标URL删除）"""
     if not request.user.is_authenticated:
         raise HttpError(400, "请先登录")
-    
-    if not payload.report_ids:
-        raise HttpError(400, "请提供要删除的漏洞 ID 列表")
-    
-    queryset = Report.objects.filter(vuln_id__in=[str(id) for id in payload.report_ids])
-    
-    # 权限过滤：逐个检查权限
-    deletable_ids = []
+
+    targets = [t.strip() for t in payload.targets if t and t.strip()]
+    if not targets:
+        raise HttpError(400, "请提供要删除的资产目标列表")
+
+    queryset = Asset.objects.filter(target__in=targets)
+
+    deletable_targets = set()
     forbidden_count = 0
-    for report in queryset:
-        if check_delete_permission(request, report):
-            deletable_ids.append(report.vuln_id)
+    for asset in queryset:
+        if check_delete_permission(request, asset):
+            deletable_targets.add(asset.target)
         else:
             forbidden_count += 1
-    
-    count, _ = Report.objects.filter(vuln_id__in=deletable_ids).delete()
-    
-    message = f"成功删除 {count} 个漏洞"
+
+    count, _ = Asset.objects.filter(target__in=deletable_targets).delete()
+
+    message = f"成功删除 {count} 个资产"
     if forbidden_count > 0:
         message += f"，{forbidden_count} 个因权限不足被跳过"
-    
+
+    audit_target_id = ', '.join(targets)
+    if len(audit_target_id) > 50:
+        audit_target_id = audit_target_id[:47] + '...'
+
     AuditLog.objects.create(
-        user=request.user, action='BATCH_REPORTS_DELETED', target_type='Report',
-        target_id=', '.join(map(str, payload.report_ids)), 
-        detail=f"批量删除漏洞: {count}个成功",
+        user=request.user, action='BATCH_ASSETS_DELETED', target_type='Asset',
+        target_id=audit_target_id,
+        detail=f"批量删除资产: {count}个成功",
     )
-    
+
     return {
         "success": True,
         "deleted": count,
@@ -2814,46 +2858,6 @@ def delete_asset(request: HttpRequest, asset_id: int):
     )
     
     return {"success": True, "message": f"资产 '{asset_name}' 已删除"}
-
-
-@router.post("/assets/batch-delete")
-def batch_delete_assets(request: HttpRequest, payload: AssetDeleteSchema):
-    """批量删除资产"""
-    if not request.user.is_authenticated:
-        raise HttpError(400, "请先登录")
-    
-    if not payload.asset_ids:
-        raise HttpError(400, "请提供要删除的资产 ID 列表")
-    
-    queryset = Asset.objects.filter(id__in=payload.asset_ids)
-    
-    # 权限过滤：逐个检查权限
-    deletable_ids = []
-    forbidden_count = 0
-    for asset in queryset:
-        if check_delete_permission(request, asset):
-            deletable_ids.append(asset.id)
-        else:
-            forbidden_count += 1
-    
-    count, _ = Asset.objects.filter(id__in=deletable_ids).delete()
-    
-    message = f"成功删除 {count} 个资产"
-    if forbidden_count > 0:
-        message += f"，{forbidden_count} 个因权限不足被跳过"
-    
-    AuditLog.objects.create(
-        user=request.user, action='BATCH_ASSETS_DELETED', target_type='Asset',
-        target_id=', '.join(map(str, payload.asset_ids)),
-        detail=f"批量删除资产: {count}个成功",
-    )
-    
-    return {
-        "success": True,
-        "deleted": count,
-        "skipped": forbidden_count,
-        "message": message
-    }
 
 
 @router.get("/teams/members")
