@@ -5,7 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { assetsApi, teamsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Check, Trash2 } from 'lucide-react';
+import { Search, Filter, Plus, Server, Globe, Database, Cloud, Monitor, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Loader2, ChevronDown, ChevronRight, Shield, Wifi, Key, Cpu, User, Building, Layers, Trash2 } from 'lucide-react';
 
 const assetTypes = ['全部', 'host', 'port', 'service', 'subdomain', 'web_tech', 'ssl_cert'];
 const typeLabels: Record<string, string> = {
@@ -33,9 +33,7 @@ export default function AssetsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
-  const [userTeams, setUserTeams] = useState<any[]>([]);
-  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
-  const [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  const [userTeams, setUserTeams] = useState<any[]>([]);  // [单团队模式] 只存储当前唯一团队
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());  // 选中的资产ID
   const [batchDeleting, setBatchDeleting] = useState(false);  // 批量删除状态
 
@@ -75,8 +73,6 @@ export default function AssetsPage() {
     if (prevTeamIdRef.current !== null && prevTeamIdRef.current !== user?.team_id) {
       console.log('🔄 [DEBUG] 资产页面检测到团队切换:', prevTeamIdRef.current, '→', user?.team_id);
       setDataSource('all');
-      setSelectedTeamIds(new Set());
-      setShowTeamDropdown(false);
       setSelectedType('全部');
       setSelectedStatus('全部');
       setSearchQuery('');
@@ -104,33 +100,14 @@ export default function AssetsPage() {
     if (dataSource === 'personal') {
       matchesDataSource = asset.data_source === 'personal';
     } else if (dataSource === 'team') {
-      if (selectedTeamIds.size === 0) {
-        matchesDataSource = asset.data_source === 'team';
-      } else {
-        matchesDataSource = asset.team_id && selectedTeamIds.has(asset.team_id);
-      }
+      // [单团队模式] 直接匹配团队数据源，无需选择具体团队
+      matchesDataSource = asset.data_source === 'team';
     }
     return matchesType && matchesStatus && matchesSearch && matchesDataSource;
   });
 
   const personalCount = assets.filter(a => a.data_source === 'personal').length;
   const teamCount = assets.filter(a => a.data_source === 'team').length;
-
-  const toggleTeamSelection = (teamId: number) => {
-    setSelectedTeamIds(prev => {
-      const next = new Set(prev);
-      next.has(teamId) ? next.delete(teamId) : next.add(teamId);
-      return next;
-    });
-  };
-
-  const toggleAllTeams = () => {
-    if (selectedTeamIds.size === userTeams.length && userTeams.length > 0) {
-      setSelectedTeamIds(new Set());
-    } else {
-      setSelectedTeamIds(new Set(userTeams.map(t => t.team_id)));
-    }
-  };
 
   // 删除单个资产（按目标URL）
   const handleDelete = async (target: string, synId: number) => {
@@ -275,98 +252,24 @@ export default function AssetsPage() {
             <div className="p-6 border-b border-dark-border flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 {/* 数据来源 Tab 切换（含团队下拉） */}
-                <div className="flex bg-dark-bg rounded-lg p-1 space-x-1 relative">
+                <div className="flex bg-dark-bg rounded-lg p-1 space-x-1">
                   {[
                     { key: 'all', label: `全部 (${assets.length})`, icon: Layers },
                     { key: 'personal', label: `👤 个人 (${personalCount})`, icon: User },
-                    { key: 'team', label: `🏢 团队 (${teamCount})${selectedTeamIds.size > 0 && selectedTeamIds.size < userTeams.length ? ` ✓${selectedTeamIds.size}` : ''}`, icon: Building, hasDropdown: true },
+                    { key: 'team', label: `🏢 团队 (${teamCount})`, icon: Building },
                   ].map(tab => (
-                    <div key={tab.key} className="relative">
-                      <button
-                        onClick={() => {
-                          if (tab.hasDropdown) {
-                            setDataSource('team');
-                            setShowTeamDropdown(!showTeamDropdown);
-                          } else {
-                            setDataSource(tab.key as any);
-                            setShowTeamDropdown(false);
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 ${
-                          dataSource === tab.key
-                            ? 'bg-primary text-white shadow-sm'
-                            : 'text-gray-400 hover:text-white'
-                        }`}
-                      >
-                        <tab.icon className="w-3.5 h-3.5" />
-                        <span>{tab.label}</span>
-                        {tab.hasDropdown && userTeams.length > 0 && (
-                          <ChevronDown className={`w-3 h-3 transition-transform ${showTeamDropdown ? 'rotate-180' : ''}`} />
-                        )}
-                      </button>
-                      {/* 团队下拉菜单 */}
-                      {tab.hasDropdown && showTeamDropdown && dataSource === 'team' && (
-                        <div className="absolute top-full left-0 mt-2 w-64 bg-dark-card border border-dark-border rounded-lg shadow-xl z-50 overflow-hidden">
-                          <div className="p-3 border-b border-dark-border">
-                            <button
-                              onClick={toggleAllTeams}
-                              className="w-full px-3 py-2 rounded-md text-xs font-medium bg-dark-bg hover:bg-dark-hover transition-all flex items-center justify-between"
-                            >
-                              <span>{selectedTeamIds.size === userTeams.length && userTeams.length > 0 ? '☑ 取消全选' : '☐ 全选所有团队'}</span>
-                              <span className="text-gray-500">{selectedTeamIds.size}/{userTeams.length}</span>
-                            </button>
-                          </div>
-                          <div className="max-h-60 overflow-y-auto p-2 space-y-1">
-                            {userTeams.map(team => {
-                              const isPending = team.status === 'pending';
-                              const isAccepted = team.status === 'accepted';
-                              return (
-                              <label
-                                key={team.team_id}
-                                className={`flex items-center space-x-3 px-3 py-2 rounded-md transition-all ${
-                                  isPending
-                                    ? 'opacity-50 cursor-not-allowed bg-gray-500/5'
-                                    : selectedTeamIds.has(team.team_id)
-                                      ? 'bg-primary/10 border border-primary/30 cursor-pointer'
-                                      : 'hover:bg-dark-hover cursor-pointer'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedTeamIds.has(team.team_id)}
-                                  onChange={() => !isPending && toggleTeamSelection(team.team_id)}
-                                  disabled={isPending}
-                                  className="rounded bg-dark-bg border-dark-border accent-primary disabled:opacity-50"
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center space-x-2">
-                                    <Building className={`w-4 h-4 flex-shrink-0 ${isAccepted ? 'text-green-400' : 'text-gray-400'}`} />
-                                    <span className={`text-sm font-medium truncate ${isPending ? 'text-gray-400' : 'text-white'}`}>{team.team_name}</span>
-                                    {team.is_active && isAccepted && (
-                                      <span className="px-1.5 py-0.5 bg-primary/20 text-primary text-xs rounded">当前</span>
-                                    )}
-                                    {isPending && (
-                                      <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded">待审批</span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-gray-500 mt-0.5">
-                                    {team.asset_count} 资产 · {team.vuln_count} 漏洞
-                                    {isPending && ` · ${team.status_label || '等待审核'}`}
-                                  </div>
-                                </div>
-                                {!isPending && selectedTeamIds.has(team.team_id) && (
-                                  <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                                )}
-                              </label>
-                              );
-                            })}
-                          </div>
-                          {userTeams.length === 0 && (
-                            <div className="p-6 text-center text-gray-500 text-sm">暂未加入任何团队</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      key={tab.key}
+                      onClick={() => setDataSource(tab.key as any)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 ${
+                        dataSource === tab.key
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <tab.icon className="w-3.5 h-3.5" />
+                      <span>{tab.label}</span>
+                    </button>
                   ))}
                 </div>
               </div>

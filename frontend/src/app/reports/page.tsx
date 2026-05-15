@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { reportApi, teamsApi, SEVERITY_MAP } from '@/services/api';
-import { Filter, TrendingUp, Clock, FileText, Download, Eye, CheckSquare, Loader2, User, Building, Layers, Check, ChevronDown } from 'lucide-react';
+import { Filter, TrendingUp, Clock, FileText, Download, Eye, CheckSquare, Loader2, User, Building, Layers } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function ReportsPage() {
@@ -15,9 +15,7 @@ export default function ReportsPage() {
   const [previewMode, setPreviewMode] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
-  const [userTeams, setUserTeams] = useState<any[]>([]);
-  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
-  const [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  const [userTeams, setUserTeams] = useState<any[]>([]);  // [单团队模式]
 
   // [单团队模式] 加载用户的当前团队信息
   useEffect(() => {
@@ -94,30 +92,14 @@ export default function ReportsPage() {
     if (dataSource === 'all') return true;
     if (dataSource === 'personal') return item.data_source === 'personal';
     if (dataSource === 'team') {
-      if (selectedTeamIds.size === 0) return item.data_source === 'team';
-      return item.team_id && selectedTeamIds.has(item.team_id);
+      // [单团队模式] 直接匹配团队数据源
+      return item.data_source === 'team';
     }
     return true;
   }) || [];
 
   const personalCount = exportData?.items?.filter((item: any) => item.data_source === 'personal').length || 0;
   const teamCount = exportData?.items?.filter((item: any) => item.data_source === 'team').length || 0;
-
-  const toggleTeamSelection = (teamId: number) => {
-    setSelectedTeamIds(prev => {
-      const next = new Set(prev);
-      next.has(teamId) ? next.delete(teamId) : next.add(teamId);
-      return next;
-    });
-  };
-
-  const toggleAllTeams = () => {
-    if (selectedTeamIds.size === userTeams.length && userTeams.length > 0) {
-      setSelectedTeamIds(new Set());
-    } else {
-      setSelectedTeamIds(new Set(userTeams.map(t => t.team_id)));
-    }
-  };
 
   return (
     <div className="min-h-screen bg-dark-bg">
@@ -148,93 +130,20 @@ export default function ReportsPage() {
                         {[
                           { key: 'all', label: `全部 (${exportData.items?.length || 0})`, icon: Layers },
                           { key: 'personal', label: `👤 个人 (${personalCount})`, icon: User },
-                          { key: 'team', label: `🏢 团队 (${teamCount})${selectedTeamIds.size > 0 && selectedTeamIds.size < userTeams.length ? ` ✓${selectedTeamIds.size}` : ''}`, icon: Building, hasDropdown: true },
+                          { key: 'team', label: `🏢 团队 (${teamCount})`, icon: Building },
                         ].map(tab => (
-                          <div key={tab.key} className="relative flex-1">
-                            <button
-                              onClick={() => {
-                                if (tab.hasDropdown) {
-                                  setShowTeamDropdown(!showTeamDropdown);
-                                } else {
-                                  setDataSource(tab.key as any);
-                                  setShowTeamDropdown(false);
-                                }
-                              }}
-                              className={`w-full px-2 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center space-x-1 ${
-                                dataSource === tab.key
-                                  ? 'bg-primary text-white shadow-sm'
-                                  : 'text-gray-400 hover:text-white'
-                              }`}
-                            >
-                              <tab.icon className="w-3.5 h-3.5" />
-                              <span>{tab.label}</span>
-                              {tab.hasDropdown && userTeams.length > 0 && (
-                                <ChevronDown className={`w-3 h-3 transition-transform ${showTeamDropdown ? 'rotate-180' : ''}`} />
-                              )}
-                            </button>
-                            {/* 团队下拉菜单 */}
-                            {tab.hasDropdown && showTeamDropdown && dataSource === 'team' && (
-                              <div className="absolute top-full left-0 mt-2 w-64 bg-dark-card border border-dark-border rounded-lg shadow-xl z-50 overflow-hidden">
-                                <div className="p-3 border-b border-dark-border">
-                                  <button
-                                    onClick={toggleAllTeams}
-                                    className="w-full px-3 py-2 rounded-md text-xs font-medium bg-dark-bg hover:bg-dark-hover transition-all flex items-center justify-between"
-                                  >
-                                    <span>{selectedTeamIds.size === userTeams.length && userTeams.length > 0 ? '☑ 取消全选' : '☐ 全选所有团队'}</span>
-                                    <span className="text-gray-500">{selectedTeamIds.size}/{userTeams.length}</span>
-                                  </button>
-                                </div>
-                                <div className="max-h-60 overflow-y-auto p-2 space-y-1">
-                                  {userTeams.map(team => {
-                                    const isPending = team.status === 'pending';
-                                    const isAccepted = team.status === 'accepted';
-                                    return (
-                                    <label
-                                      key={team.team_id}
-                                      className={`flex items-center space-x-3 px-3 py-2 rounded-md transition-all ${
-                                        isPending
-                                          ? 'opacity-50 cursor-not-allowed bg-gray-500/5'
-                                          : selectedTeamIds.has(team.team_id)
-                                            ? 'bg-primary/10 border border-primary/30 cursor-pointer'
-                                            : 'hover:bg-dark-hover cursor-pointer'
-                                      }`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedTeamIds.has(team.team_id)}
-                                        onChange={() => !isPending && toggleTeamSelection(team.team_id)}
-                                        disabled={isPending}
-                                        className="rounded bg-dark-bg border-dark-border accent-primary disabled:opacity-50"
-                                      />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center space-x-2">
-                                          <Building className={`w-4 h-4 flex-shrink-0 ${isAccepted ? 'text-green-400' : 'text-gray-400'}`} />
-                                          <span className={`text-sm font-medium truncate ${isPending ? 'text-gray-400' : 'text-white'}`}>{team.team_name}</span>
-                                          {team.is_active && isAccepted && (
-                                            <span className="px-1.5 py-0.5 bg-primary/20 text-primary text-xs rounded">当前</span>
-                                          )}
-                                          {isPending && (
-                                            <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded">待审批</span>
-                                          )}
-                                        </div>
-                                        <div className="text-xs text-gray-500 mt-0.5">
-                                          {team.vuln_count} 漏洞
-                                          {isPending && ` · ${team.status_label || '等待审核'}`}
-                                        </div>
-                                      </div>
-                                      {!isPending && selectedTeamIds.has(team.team_id) && (
-                                        <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                                      )}
-                                    </label>
-                                    );
-                                  })}
-                                </div>
-                                {userTeams.length === 0 && (
-                                  <div className="p-6 text-center text-gray-500 text-sm">暂未加入任何团队</div>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            key={tab.key}
+                            onClick={() => setDataSource(tab.key as any)}
+                            className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center space-x-1 ${
+                              dataSource === tab.key
+                                ? 'bg-primary text-white shadow-sm'
+                                : 'text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            <tab.icon className="w-3.5 h-3.5" />
+                            <span>{tab.label}</span>
+                          </button>
                         ))}
                       </div>
                     </div>

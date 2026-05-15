@@ -5,7 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { scansApi, teamsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Plus, Play, Globe, Filter, Upload, ChevronLeft, ChevronRight, Activity, Loader2, Settings2, ChevronDown, ChevronUp, Trash2, XCircle, RotateCw, CheckSquare, User, Building, Layers, Check } from 'lucide-react';
+import { Search, Plus, Play, Globe, Filter, Upload, ChevronLeft, ChevronRight, Activity, Loader2, Settings2, ChevronUp, Trash2, XCircle, RotateCw, CheckSquare, User, Building, Layers } from 'lucide-react';
 
 const MODULE_GROUPS: Record<string, string[]> = {
   "端口扫描": ["port_scan", "icmp_scan"],
@@ -42,9 +42,7 @@ export default function ScansPage() {
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);  // 后台刷新状态（不显示loading）
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
-  const [userTeams, setUserTeams] = useState<any[]>([]);  // 用户的所有团队
-  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());  // 选中的团队ID（多选）
-  const [showTeamDropdown, setShowTeamDropdown] = useState(false);  // 是否显示团队下拉菜单
+  const [userTeams, setUserTeams] = useState<any[]>([]);  // [单团队模式]
   // 创建任务时的身份选择
   const [createDataSource, setCreateDataSource] = useState<'personal' | 'team'>('team');  // 创建时的身份：个人/团队
   const [createTeamId, setCreateTeamId] = useState<number | null>(null);  // 创建时选择的团队ID
@@ -148,34 +146,14 @@ export default function ScansPage() {
     if (dataSource === 'all') return true;
     if (dataSource === 'personal') return s.data_source === 'personal';
     if (dataSource === 'team') {
-      // 如果没有选中任何团队，显示所有团队数据
-      if (selectedTeamIds.size === 0) return s.data_source === 'team';
-      // 如果选中了团队，只显示这些团队的数据
-      return s.team_id && selectedTeamIds.has(s.team_id);
+      // [单团队模式] 直接匹配团队数据源
+      return s.data_source === 'team';
     }
     return true;
   });
 
   const personalCount = scans.filter(s => s.data_source === 'personal').length;
   const teamCount = scans.filter(s => s.data_source === 'team').length;
-
-  // 切换团队选择
-  const toggleTeamSelection = (teamId: number) => {
-    setSelectedTeamIds(prev => {
-      const next = new Set(prev);
-      next.has(teamId) ? next.delete(teamId) : next.add(teamId);
-      return next;
-    });
-  };
-
-  // 全选/取消全选团队
-  const toggleAllTeams = () => {
-    if (selectedTeamIds.size === userTeams.length && userTeams.length > 0) {
-      setSelectedTeamIds(new Set());  // 取消全选
-    } else {
-      setSelectedTeamIds(new Set(userTeams.map(t => t.team_id)));  // 全选
-    }
-  };
 
   const toggleGroup = (group: string) => {
     setExpandedGroups(prev => {
@@ -620,99 +598,25 @@ export default function ScansPage() {
                   <Filter className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-semibold text-white">扫描任务列表</h3>
                 </div>
-                {/* 数据来源 Tab 切换（含团队下拉） */}
-                <div className="flex bg-dark-bg rounded-lg p-1 space-x-1 relative">
+                {/* 数据来源 Tab 切换 */}
+                <div className="flex bg-dark-bg rounded-lg p-1 space-x-1">
                   {[
                     { key: 'all', label: `全部 (${total})`, icon: Layers },
                     { key: 'personal', label: `👤 个人 (${personalCount})`, icon: User },
-                    { key: 'team', label: `🏢 团队 (${teamCount})${selectedTeamIds.size > 0 && selectedTeamIds.size < userTeams.length ? ` ✓${selectedTeamIds.size}` : ''}`, icon: Building, hasDropdown: true },
+                    { key: 'team', label: `🏢 团队 (${teamCount})`, icon: Building },
                   ].map(tab => (
-                    <div key={tab.key} className="relative">
-                      <button
-                        onClick={() => {
-                          if (tab.hasDropdown) {
-                            setDataSource('team');
-                            setShowTeamDropdown(!showTeamDropdown);
-                          } else {
-                            setDataSource(tab.key as any);
-                            setShowTeamDropdown(false);
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 ${
-                          dataSource === tab.key
-                            ? 'bg-primary text-white shadow-sm'
-                            : 'text-gray-400 hover:text-white'
-                        }`}
-                      >
-                        <tab.icon className="w-3.5 h-3.5" />
-                        <span>{tab.label}</span>
-                        {tab.hasDropdown && userTeams.length > 0 && (
-                          <ChevronDown className={`w-3 h-3 transition-transform ${showTeamDropdown ? 'rotate-180' : ''}`} />
-                        )}
-                      </button>
-                      {/* 团队下拉菜单 */}
-                      {tab.hasDropdown && showTeamDropdown && dataSource === 'team' && (
-                        <div className="absolute top-full left-0 mt-2 w-64 bg-dark-card border border-dark-border rounded-lg shadow-xl z-50 overflow-hidden">
-                          <div className="p-3 border-b border-dark-border">
-                            <button
-                              onClick={toggleAllTeams}
-                              className="w-full px-3 py-2 rounded-md text-xs font-medium bg-dark-bg hover:bg-dark-hover transition-all flex items-center justify-between"
-                            >
-                              <span>{selectedTeamIds.size === userTeams.length && userTeams.length > 0 ? '☑ 取消全选' : '☐ 全选所有团队'}</span>
-                              <span className="text-gray-500">{selectedTeamIds.size}/{userTeams.length}</span>
-                            </button>
-                          </div>
-                          <div className="max-h-60 overflow-y-auto p-2 space-y-1">
-                            {userTeams.map(team => {
-                              const isPending = team.status === 'pending';
-                              const isAccepted = team.status === 'accepted';
-                              return (
-                              <label
-                                key={team.team_id}
-                                className={`flex items-center space-x-3 px-3 py-2 rounded-md transition-all ${
-                                  isPending
-                                    ? 'opacity-50 cursor-not-allowed bg-gray-500/5'
-                                    : selectedTeamIds.has(team.team_id)
-                                      ? 'bg-primary/10 border border-primary/30 cursor-pointer'
-                                      : 'hover:bg-dark-hover cursor-pointer'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedTeamIds.has(team.team_id)}
-                                  onChange={() => !isPending && toggleTeamSelection(team.team_id)}
-                                  disabled={isPending}
-                                  className="rounded bg-dark-bg border-dark-border accent-primary disabled:opacity-50"
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center space-x-2">
-                                    <Building className={`w-4 h-4 flex-shrink-0 ${isAccepted ? 'text-green-400' : 'text-gray-400'}`} />
-                                    <span className={`text-sm font-medium truncate ${isPending ? 'text-gray-400' : 'text-white'}`}>{team.team_name}</span>
-                                    {team.is_active && isAccepted && (
-                                      <span className="px-1.5 py-0.5 bg-primary/20 text-primary text-xs rounded">当前</span>
-                                    )}
-                                    {isPending && (
-                                      <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded">待审批</span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-gray-500 mt-0.5">
-                                    {team.scan_count} 任务 · {team.vuln_count} 漏洞
-                                    {isPending && ` · ${team.status_label || '等待审核'}`}
-                                  </div>
-                                </div>
-                                {!isPending && selectedTeamIds.has(team.team_id) && (
-                                  <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                                )}
-                              </label>
-                              );
-                            })}
-                          </div>
-                          {userTeams.length === 0 && (
-                            <div className="p-6 text-center text-gray-500 text-sm">暂未加入任何团队</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      key={tab.key}
+                      onClick={() => setDataSource(tab.key as any)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 ${
+                        dataSource === tab.key
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <tab.icon className="w-3.5 h-3.5" />
+                      <span>{tab.label}</span>
+                    </button>
                   ))}
                 </div>
                 {selectedIds.size > 0 && (
