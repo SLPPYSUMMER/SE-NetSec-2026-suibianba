@@ -13,6 +13,7 @@ SecGuard API - 基于 Django Ninja 的漏洞管理平台接口
 """
 
 import json
+import html as html_mod
 
 from ninja import Router
 from ninja.errors import HttpError
@@ -2103,7 +2104,6 @@ def import_scan_results(request: HttpRequest):
 
 class ExportSchema(BaseModel):
     format: str = Field("pdf", description="导出格式: pdf/html")
-    project_id: Optional[int] = Field(None, description="项目筛选")
     status: Optional[str] = Field(None, description="状态筛选")
     severity: Optional[str] = Field(None, description="严重程度筛选: critical/high/medium/low")
     date_from: Optional[str] = Field(None, description="开始日期 (YYYY-MM-DD)")
@@ -2117,8 +2117,6 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
 
     queryset = Report.objects.all()
     queryset = filter_by_team(queryset, request)
-    if payload.project_id:
-        queryset = queryset.filter(project_id=payload.project_id)
     if payload.status:
         queryset = queryset.filter(status=payload.status)
     if payload.severity:
@@ -2138,12 +2136,14 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
     closed = queryset.filter(status=Report.Status.CLOSED).count()
     fix_rate = f"{(fixed + closed) / total * 100:.1f}%" if total > 0 else "0%"
 
-    # 处理时长统计
+    # ===== 处理时长统计 =====
     from datetime import timedelta
     now = timezone.now()
     avg_days_str = "--"
     longest_pending_str = "--"
     stale_count = 0
+    stale_pending = 0
+    stale_processing = 0
 
     # 已完成漏洞平均处理天数
     done_qs = queryset.filter(status__in=[Report.Status.FIXED, Report.Status.CLOSED])
@@ -2159,13 +2159,18 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
         days = (now - oldest.created_at).days
         longest_pending_str = f"{days}天 ({oldest.vuln_id})"
 
-    # 超期未关（>7天）
-    stale_count = queryset.filter(
-        status__in=[Report.Status.PENDING, Report.Status.PROCESSING],
+    # 超期未关 — 待分派超 3 天 / 处理中超 7 天
+    stale_pending = queryset.filter(
+        status=Report.Status.PENDING,
+        created_at__lt=now - timedelta(days=3)
+    ).count()
+    stale_processing = queryset.filter(
+        status=Report.Status.PROCESSING,
         created_at__lt=now - timedelta(days=7)
     ).count()
+    stale_count = stale_pending + stale_processing
 
-    # 按严重度修复率
+    # ===== 按严重度修复率 =====
     sev_fix_rates = {}
     for sev in ['critical', 'high', 'medium', 'low']:
         sev_total = queryset.filter(severity=sev).count()
@@ -2175,17 +2180,20 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
         else:
             sev_fix_rates[sev] = {"total": 0, "fixed": 0, "rate": "--"}
 
-    # 分析段数据
-    project_count = queryset.values('project').distinct().count()
+    # ===== 分析段数据 =====
     high_critical_count = queryset.filter(severity__in=['critical', 'high']).count()
     high_critical_pct = f"{high_critical_count / total * 100:.1f}%" if total > 0 else "0%"
-    top_project = None
-    if total > 0:
-        top_project = queryset.values('project__name').annotate(c=Count('id')).order_by('-c').first()
     top_reporter = None
     if total > 0:
-        top_reporter = queryset.values('reporter__username').annotate(c=Count('id')).order_by('-c').first()
+        top_reporter = queryset.values('reporter__username').annotate(c=Count('vuln_id')).order_by('-c').first()
     crit_fix_rate = sev_fix_rates.get('critical', {}).get('rate', '--')
+    # 漏洞密度（条/天）
+    if total > 0 and queryset.exists():
+        first_date = queryset.order_by('created_at').first().created_at
+        date_span = max((now - first_date).days, 1)
+        vuln_density = f"{total / date_span:.1f}"
+    else:
+        vuln_density = "0"
 
     sev_map = {"critical": "严重", "high": "高危", "medium": "中危", "low": "低危"}
     sta_map = {"pending": "待分派", "processing": "处理中", "fixed": "已修复", "reviewing": "已复核", "closed": "已关闭"}
@@ -2210,31 +2218,39 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
         sev_fix_rows += f"""<tr><td>{sev_map.get(sev, sev)}</td><td>{d['total']}</td><td>{d['fixed']}</td><td>{d['rate']}</td></tr>"""
 
     # 分析段
-    top_proj_name = top_project['project__name'] if top_project else ''
-    top_proj_count = top_project['c'] if top_project else 0
-    top_reporter_name = top_reporter['reporter__username'] if top_reporter else ''
+    top_reporter_name = html_mod.escape(top_reporter['reporter__username']) if top_reporter else ''
     top_reporter_count = top_reporter['c'] if top_reporter else 0
+
+    # 超期明细文字
+    stale_detail = ""
+    if stale_pending > 0 and stale_processing > 0:
+        stale_detail = f"，其中待分派超3天 <b>{stale_pending}个</b>、处理中超7天 <b>{stale_processing}个</b>"
+    elif stale_pending > 0:
+        stale_detail = f"，均为待分派超3天"
+    elif stale_processing > 0:
+        stale_detail = f"，均为处理中超7天"
 
     analysis_html = f"""
     <div class="analysis">
       <h2>数据分析与建议</h2>
       <div class="insight">
         <h3>总体概况</h3>
-        <p>本次报告覆盖项目 <b>{project_count}个</b>，共包含 <b>{total}个</b> 漏洞。整体修复率为 <b>{fix_rate}</b>。高危及以上漏洞 <b>{high_critical_count}个</b>，占总数 {high_critical_pct}，建议优先关注。</p>
+        <p>本次报告共包含 <b>{total}个</b> 漏洞，漏洞密度约 <b>{vuln_density}条/天</b>。整体修复率为 <b>{fix_rate}</b>。高危及以上漏洞 <b>{high_critical_count}个</b>，占总数 {high_critical_pct}，建议优先关注。</p>
       </div>
       <div class="insight">
         <h3>处理效率</h3>
-        <p>已修复漏洞平均处理周期 <b>{avg_days_str}</b>。最长未处理时长为 <b>{longest_pending_str}</b>。有 <b>{stale_count}个</b> 漏洞超过 <b>7天</b> 未关闭，建议排期跟进。</p>
+        <p>已修复漏洞平均处理周期 <b>{avg_days_str}</b>。最长未处理时长为 <b>{longest_pending_str}</b>。超期未关共 <b>{stale_count}个</b>{stale_detail}，建议排期跟进。<br>
+        <small style="color:#94a3b8;">※ 超期定义：待分派超3天未指派 / 处理中超7天未修复</small></p>
       </div>
       <div class="insight">
         <h3>重点关注</h3>
         <p>"""
-    if top_project:
-        analysis_html += f'项目 <b>"{top_proj_name}"</b> 漏洞最多（{top_proj_count}个，占比{top_proj_count / total * 100:.1f}%），建议加强该项目的安全检测频次。<br>'
     if sev_fix_rates.get('critical', {}).get('total', 0) > 0 and crit_fix_rate not in ('--', '100.0%'):
         analysis_html += f'<b>极危漏洞</b>修复率仅{crit_fix_rate}，低于整体水平，需立即处理。<br>'
     if top_reporter:
         analysis_html += f'安全测试员 <b>{top_reporter_name}</b> 上报漏洞数量最多（{top_reporter_count}个），建议保持关注。'
+    if total > 0 and high_critical_count / total >= 0.3:
+        analysis_html += f'<br>高危及以上漏洞占比超过 <b>30%</b>，整体安全态势需要引起重视。'
     analysis_html += """</p>
       </div>
       <p class="disclaimer">* 以上分析由 SecGuard 基于导出数据自动生成，规则引擎驱动。</p>
@@ -2251,17 +2267,20 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
 
     rows = ""
     for r in reports:
+        title_esc = html_mod.escape(r.title)
+        reporter_esc = html_mod.escape(r.reporter.username) if r.reporter else ''
+        assignee_esc = html_mod.escape(r.assignee.username) if r.assignee else ''
         rows += f"""<tr>
-            <td>{r.vuln_id}</td><td>{r.title}</td><td>{sev_map.get(r.severity, r.severity)}</td>
-            <td>{sta_map.get(r.status, r.status)}</td><td>{r.reporter.username if r.reporter else ''}</td>
-            <td>{r.assignee.username if r.assignee else ''}</td><td>{r.created_at.strftime('%Y-%m-%d')}</td>
+            <td>{html_mod.escape(r.vuln_id)}</td><td>{title_esc}</td><td>{sev_map.get(r.severity, r.severity)}</td>
+            <td>{sta_map.get(r.status, r.status)}</td><td>{reporter_esc}</td>
+            <td>{assignee_esc}</td><td>{r.created_at.strftime('%Y-%m-%d')}</td>
         </tr>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="zh">
 <head><meta charset="UTF-8"><title>SecGuard 安全审计报告</title>
 <style>
-    body{{font-family:'Microsoft YaHei',sans-serif;max-width:960px;margin:40px auto;color:#1a1a2e;font-size:14px;}}
+    body{{font-family:'WenQuanYi Micro Hei','Microsoft YaHei','Noto Sans CJK SC',sans-serif;max-width:960px;margin:40px auto;color:#1a1a2e;font-size:14px;}}
     h1{{color:#0ea5e9;border-bottom:2px solid #0ea5e9;padding-bottom:10px;font-size:24px;}}
     h2{{color:#334155;font-size:18px;margin-top:30px;border-left:4px solid #0ea5e9;padding-left:12px;}}
     .meta{{color:#64748b;font-size:13px;margin-bottom:20px;}}
@@ -2293,7 +2312,13 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
 </div>
 
 <h2>处理效率</h2>
-<table class="fix-table"><tr><td>平均处理周期</td><td style="font-weight:bold;">{avg_days_str}</td><td>最长未处理</td><td style="font-weight:bold;">{longest_pending_str}</td><td>超期未关 (>7天)</td><td style="font-weight:bold;color:#ef4444;">{stale_count}个</td></tr></table>
+<table class="fix-table">
+  <tr><th>指标</th><th>数值</th><th>说明</th></tr>
+  <tr><td>平均处理周期</td><td style="font-weight:bold;">{avg_days_str}</td><td>已修复/已关闭漏洞从创建到关闭的平均天数</td></tr>
+  <tr><td>最长未处理</td><td style="font-weight:bold;">{longest_pending_str}</td><td>待分派/处理中状态中创建时间最早的漏洞</td></tr>
+  <tr><td>超期未关</td><td style="font-weight:bold;color:#ef4444;">{stale_count}个</td><td>待分派超3天: {stale_pending}个 | 处理中超7天: {stale_processing}个</td></tr>
+  <tr><td>漏洞密度</td><td style="font-weight:bold;">{vuln_density}条/天</td><td>报告周期内日均新增漏洞数</td></tr>
+</table>
 
 <h2>严重度分布</h2>
 <table class="bar-chart">{sev_bars}</table>
@@ -2343,6 +2368,9 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
                 "avg_processing_days": avg_days_str,
                 "longest_pending": longest_pending_str,
                 "stale_count": stale_count,
+                "stale_pending": stale_pending,
+                "stale_processing": stale_processing,
+                "vuln_density": vuln_density,
                 "high_critical_pct": high_critical_pct,
                 "severity_fix_rates": sev_fix_rates,
             },
@@ -2355,16 +2383,6 @@ _TYPE_LABEL_MAP = {
     "host": "主机", "port": "端口", "service": "服务",
     "subdomain": "子域名", "web_tech": "Web技术", "ssl_cert": "SSL证书",
 }
-
-
-@router.get("/projects")
-def list_projects(request: HttpRequest):
-    """列出所有项目，供报告导出筛选使用"""
-    if not request.user.is_authenticated:
-        raise HttpError(400, "请先登录")
-    from website.models import Project
-    projects = Project.objects.all()
-    return [{"id": p.id, "name": p.name} for p in projects]
 
 
 @router.get("/assets")

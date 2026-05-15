@@ -1,16 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { reportApi, SEVERITY_MAP } from '@/services/api';
-import { Filter, Download, Eye, CheckSquare, Loader2, User, Building, Layers } from 'lucide-react';
+import { Filter, Download, Eye, CheckSquare, Loader2, User, Building, Layers, Calendar } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function ReportsPage() {
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [selectedSeverity, setSelectedSeverity] = useState('all');
-  const [selectedProject, setSelectedProject] = useState<number | 'all'>('all');
   const [dateRange, setDateRange] = useState<'7d' | '30d' | 'all' | 'custom'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -20,20 +19,23 @@ export default function ReportsPage() {
   const [previewMode, setPreviewMode] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
-  const [projects, setProjects] = useState<any[]>([]);
-
-  // [单团队模式] 数据过滤逻辑已简化，无需加载团队列表
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const datePickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch('/api/secguard/projects', { credentials: 'include' })
-      .then(r => r.json()).then(setProjects).catch(() => {});
-  }, []);
+    const handleClickOutside = (e: MouseEvent) => {
+      if (datePickerRef.current && !datePickerRef.current.contains(e.target as Node)) {
+        setShowDatePicker(false);
+      }
+    };
+    if (showDatePicker) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showDatePicker]);
 
   const buildParams = (format: string): Record<string, string> => {
     const params: Record<string, string> = { format };
     if (selectedStatus !== 'all') params.status = selectedStatus;
     if (selectedSeverity !== 'all') params.severity = selectedSeverity;
-    if (selectedProject !== 'all') params.project_id = String(selectedProject);
     if (dateRange === '7d') {
       const d = new Date(); d.setDate(d.getDate() - 7);
       params.date_from = d.toISOString().substring(0, 10);
@@ -149,27 +151,34 @@ export default function ReportsPage() {
                       ))}
                     </div>
                     {dateRange === 'custom' && (
-                      <div className="flex gap-2">
-                        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                          className="flex-1 px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary" />
-                        <span className="text-gray-500 self-center">—</span>
-                        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                          className="flex-1 px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary" />
+                      <div className="relative" ref={datePickerRef}>
+                        <button onClick={() => setShowDatePicker(!showDatePicker)}
+                          className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-gray-300 hover:border-primary flex items-center space-x-2 transition-colors">
+                          <Calendar className="w-4 h-4 text-gray-500" />
+                          <span>{dateFrom && dateTo ? `${dateFrom} ~ ${dateTo}` : dateFrom || dateTo || '选择日期范围'}</span>
+                        </button>
+                        {showDatePicker && (
+                          <div className="absolute top-full left-0 mt-2 bg-dark-card border border-dark-border rounded-xl p-4 shadow-2xl z-50 w-72">
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">开始日期</label>
+                                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                                  className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary" />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">结束日期</label>
+                                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                                  className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm text-white focus:outline-none focus:border-primary" />
+                              </div>
+                              <button onClick={() => setShowDatePicker(false)}
+                                className="w-full py-2 bg-primary text-white text-sm rounded-lg hover:bg-primary/80 transition-colors">
+                                确定
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
-
-                  {/* 项目筛选 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">项目</label>
-                    <select value={selectedProject === 'all' ? 'all' : String(selectedProject)}
-                      onChange={(e) => setSelectedProject(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
-                      <option value="all">全部项目</option>
-                      {projects.map((p: any) => (
-                        <option key={p.id} value={String(p.id)}>{p.name}</option>
-                      ))}
-                    </select>
                   </div>
 
                   {/* 严重度 + 状态 */}
@@ -258,16 +267,29 @@ export default function ReportsPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="grid grid-cols-4 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                       {[
                         { label: '漏洞总数', value: exportData.summary?.total ?? 0 },
                         { label: '修复率', value: exportData.summary?.fix_rate ?? '0%', color: 'text-green-400' },
-                        { label: '平均处理', value: exportData.summary?.avg_processing_days ?? '--' },
-                        { label: '超期未关', value: exportData.summary?.stale_count ?? 0, color: 'text-red-400' },
+                        { label: '漏洞密度', value: `${exportData.summary?.vuln_density ?? '--'} 条/天` },
                       ].map((s, i) => (
                         <div key={i} className="bg-dark-bg rounded-lg p-6">
                           <p className="text-sm text-gray-400 mb-1">{s.label}</p>
                           <p className={`text-3xl font-bold ${s.color || 'text-white'}`}>{s.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-5 gap-4">
+                      {[
+                        { label: '平均处理', value: exportData.summary?.avg_processing_days ?? '--' },
+                        { label: '超期未关', value: exportData.summary?.stale_count ?? 0, color: 'text-red-400' },
+                        { label: '待分派超3天', value: exportData.summary?.stale_pending ?? '--', color: 'text-yellow-400' },
+                        { label: '处理中超7天', value: exportData.summary?.stale_processing ?? '--', color: 'text-orange-400' },
+                        { label: '高危占比', value: exportData.summary?.high_critical_pct ?? '--' },
+                      ].map((s, i) => (
+                        <div key={i} className="bg-dark-bg rounded-lg p-4">
+                          <p className="text-xs text-gray-400 mb-1">{s.label}</p>
+                          <p className={`text-2xl font-bold ${s.color || 'text-white'}`}>{s.value}</p>
                         </div>
                       ))}
                     </div>

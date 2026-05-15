@@ -13,11 +13,12 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     libpng-dev libjpeg-dev libtiff-dev libwebp-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# weasyprint PDF export dependencies
+# weasyprint PDF export dependencies + CJK fonts
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 && \
+    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
+    fonts-wqy-microhei && \
     rm -rf /var/lib/apt/lists/*
 
 # 配置国内镜像源加速（阿里云 + 清华源备份）
@@ -76,11 +77,12 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     libpng16-16 libjpeg62-turbo libtiff5 libwebp6 && \
     rm -rf /var/lib/apt/lists/*
 
-# weasyprint PDF export dependencies
+# weasyprint PDF export dependencies + CJK fonts
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 && \
+    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
+    fonts-wqy-microhei && \
     rm -rf /var/lib/apt/lists/*
 
 COPY . /blt
