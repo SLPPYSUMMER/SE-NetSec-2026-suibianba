@@ -19,17 +19,22 @@ export default function ReportsPage() {
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [showTeamDropdown, setShowTeamDropdown] = useState(false);
 
-  // 加载用户的团队列表
+  // [单团队模式] 加载用户的当前团队信息
   useEffect(() => {
-    const loadTeams = async () => {
+    const loadTeam = async () => {
       try {
-        const data = await teamsApi.myTeams();
-        setUserTeams(data.items || []);
+        const data = await teamsApi.getMyTeam();
+        if (data.has_team && data.team) {
+          setUserTeams([data.team]);
+        } else {
+          setUserTeams([]);
+        }
       } catch (err) {
-        console.error('加载团队列表失败:', err);
+        console.error('加载团队信息失败:', err);
+        setUserTeams([]);
       }
     };
-    loadTeams();
+    loadTeam();
   }, []);
 
   const handleDownloadFile = async (format: string) => {

@@ -68,30 +68,37 @@ export default function ScansPage() {
 
   useEffect(() => { fetchScans(true); }, [page, statusFilter]);
 
-  // 加载用户的团队列表
+  // [单团队模式] 加载用户的当前团队信息
   useEffect(() => {
-    const loadTeams = async () => {
+    const loadTeam = async () => {
       try {
-        console.log('🔍 [DEBUG] 开始加载团队列表...');
-        const data = await teamsApi.myTeams();
+        console.log('🔍 [DEBUG] 开始加载团队信息（单团队模式）...');
+        const data = await teamsApi.getMyTeam();
         console.log('✅ [DEBUG] API 返回原始数据:', data);
-        console.log('✅ [DEBUG] 团队列表 (data.items):', data.items);
-        console.log('✅ [DEBUG] 团队数量:', data.items?.length || 0);
 
-        const teams = data.items || [];
-        setUserTeams(teams);
-
-        // 设置默认创建身份：如果有当前团队，默认选择团队身份
-        if (user?.team_id && teams.length > 0) {
+        if (data.has_team && data.team) {
+          const teams = [data.team];  // 单团队模式：只有一个团队
+          setUserTeams(teams);
+          
+          // 设置默认创建身份：使用当前团队
           setCreateDataSource('team');
-          setCreateTeamId(user.team_id);
-        } else if (teams.length === 0) {
+          setCreateTeamId(data.team.id);
+          
+          console.log('✅ [DEBUG] 团队信息已加载:', data.team.name);
+        } else {
+          setUserTeams([]);
           // 没有团队，只能选择个人
           setCreateDataSource('personal');
           setCreateTeamId(null);
+          console.log('⚠️ [DEBUG] 用户未加入任何团队');
         }
-
-        console.log('📊 [DEBUG] userTeams 状态已更新，团队详情:');
+      } catch (err) {
+        console.error('加载团队信息失败:', err);
+        setUserTeams([]);
+      }
+    };
+    loadTeam();
+  }, []);
         teams.forEach((team, index) => {
           console.log(`  ${index + 1}. ${team.team_name} (ID: ${team.team_id}, 状态: ${team.status})`);
         });

@@ -5,7 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { teamsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Users, UserPlus, Check, X, Mail, Shield, Loader2, AlertCircle, Trash2, Search, Building, ArrowLeftRight, AlertTriangle, LogOut, PlusCircle } from 'lucide-react';
+import { Users, UserPlus, Check, X, Mail, Shield, Loader2, AlertCircle, Trash2, Search, Building, AlertTriangle, LogOut, PlusCircle } from 'lucide-react';
 
 const ROLE_OPTIONS = [
   { value: 'team_lead', label: '安全负责人' },
@@ -31,8 +31,6 @@ export default function TeamPage() {
   const [expandedTeam, setExpandedTeam] = useState<number | null>(null);
   const [hasPendingInvite, setHasPendingInvite] = useState(false);
   const [pendingInviteInfo, setPendingInviteInfo] = useState<any>(null);
-  const [myTeams, setMyTeams] = useState<any[]>([]);
-  const [switching, setSwitching] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   const isAdmin = user?.role === '团队管理员' || user?.is_staff;
@@ -57,8 +55,6 @@ export default function TeamPage() {
         const inv = await teamsApi.pendingInvitation().catch(() => ({ has_pending: false }));
         setHasPendingInvite(inv.has_pending);
         setPendingInviteInfo(inv);
-        const mt = await teamsApi.myTeams().catch(() => ({ items: [] }));
-        setMyTeams(mt.items || []);
       } catch {} finally { setLoading(false); }
     };
     fetch();
@@ -96,20 +92,6 @@ export default function TeamPage() {
   };
   const handleDeclineInvite = async () => {
     try { await teamsApi.declineInvite(); showMsg('已拒绝邀请'); } catch (err: any) { showMsg(err.message); }
-  };
-  const handleSwitchTeam = async (teamId: number) => {
-    if (teamId === user?.team_id) return;
-    setSwitching(true);
-    try {
-      const r = await teamsApi.switchTeam(teamId);
-      await refreshUser();
-      setTab('members');
-      showMsg(r.message || '已切换团队');
-    } catch (err: any) {
-      showMsg(err.message);
-    } finally {
-      setSwitching(false);
-    }
   };
 
   const handleLeave = async () => {
@@ -152,19 +134,8 @@ export default function TeamPage() {
         <main className="p-6 space-y-6">
           <div className="flex items-center justify-between">
             <div><h1 className="text-3xl font-bold text-white">团队看板</h1><p className="text-sm text-gray-400 mt-1">超级管理员全局视图</p></div>
-            {/* team switcher for admin */}
-            {myTeams.length > 0 && (
-              <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-400">活跃团队:</span>
-                <select value={user.team_id || ''} onChange={(e) => e.target.value && handleSwitchTeam(parseInt(e.target.value))} disabled={switching}
-                  className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-sm text-white cursor-pointer disabled:opacity-50">
-                  <option value="">全局视图</option>
-                  {myTeams.map((t: any) => (
-                    <option key={t.team_id} value={t.team_id}>{t.team_name} ({t.role_label}){t.is_active ? ' ←' : ''}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            
+            {/* 单团队模式：管理员可查看所有团队，但不支持切换 */}
           </div>
           {actionMsg && <div className="bg-primary/10 border border-primary/30 text-primary px-4 py-3 rounded-lg text-sm">{actionMsg}</div>}
 
@@ -398,114 +369,7 @@ export default function TeamPage() {
           </div>
         )}
 
-        {/* 📋 我的所有团队列表 */}
-        {myTeams.length > 0 && (
-          <div className="bg-dark-card border border-dark-border rounded-xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white flex items-center space-x-2">
-                <Building className="w-5 h-5 text-primary" />
-                <span>我的所有团队 ({myTeams.length})</span>
-              </h3>
-              <span className="text-xs text-gray-500">点击切换管理不同团队</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {myTeams.map((team: any) => {
-                const isCurrentTeam = team.team_id === user?.team_id;
-                const isAccepted = team.status === 'accepted';
-                const isPending = team.status === 'pending';
-
-                return (
-                  <div
-                    key={team.team_id}
-                    className={`relative p-4 rounded-lg border transition-all ${
-                      isCurrentTeam
-                        ? 'bg-primary/10 border-primary/30 shadow-lg shadow-primary/10'
-                        : isPending
-                          ? 'bg-gray-500/5 border-gray-600/30 opacity-60'
-                          : 'bg-dark-bg border-dark-border hover:border-primary/30 hover:bg-primary/5'
-                    }`}
-                  >
-                    {/* 当前团队标识 */}
-                    {isCurrentTeam && isAccepted && (
-                      <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-primary text-white text-xs rounded-full font-medium">
-                        当前
-                      </div>
-                    )}
-
-                    {/* 待审批标识 */}
-                    {isPending && (
-                      <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-yellow-500 text-black text-xs rounded-full font-medium">
-                        待审批
-                      </div>
-                    )}
-
-                    {/* 团队信息 */}
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between">
-                        <h4 className={`font-medium ${isPending ? 'text-gray-400' : 'text-white'}`}>
-                          {team.team_name}
-                        </h4>
-                        <span className={`text-xs px-2 py-0.5 rounded ${
-                          team.role === 'admin'
-                            ? 'bg-purple-500/20 text-purple-400'
-                            : 'bg-blue-500/20 text-blue-400'
-                        }`}>
-                          {team.role_label}
-                        </span>
-                      </div>
-
-                      {/* 数据统计 */}
-                      <div className="grid grid-cols-3 gap-2 text-xs text-gray-500">
-                        <div className="text-center p-1.5 bg-dark-card/50 rounded">
-                          <p className="font-medium text-white">{team.scan_count}</p>
-                          <p>任务</p>
-                        </div>
-                        <div className="text-center p-1.5 bg-dark-card/50 rounded">
-                          <p className="font-medium text-white">{team.vuln_count}</p>
-                          <p>漏洞</p>
-                        </div>
-                        <div className="text-center p-1.5 bg-dark-card/50 rounded">
-                          <p className="font-medium text-white">{team.asset_count}</p>
-                          <p>资产</p>
-                        </div>
-                      </div>
-
-                      {/* 操作按钮 */}
-                      {!isCurrentTeam && isAccepted && (
-                        <button
-                          onClick={() => handleSwitchTeam(team.team_id)}
-                          disabled={switching}
-                          className="w-full mt-2 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary rounded-lg text-xs font-medium hover:bg-primary/20 transition-all disabled:opacity-50 flex items-center justify-center space-x-1"
-                        >
-                          <ArrowLeftRight className="w-3 h-3" />
-                          <span>切换到此团队</span>
-                        </button>
-                      )}
-
-                      {isCurrentTeam && (
-                        <div className="mt-2 text-xs text-center text-primary font-medium">
-                          ✓ 正在管理此团队
-                        </div>
-                      )}
-
-                      {isPending && (
-                        <div className="mt-2 text-xs text-center text-yellow-400">
-                          等待管理员审核...
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* 提示信息 */}
-            <p className="text-xs text-gray-500 mt-4 text-center">
-              💡 提示：切换团队后，此页面的成员管理、数据统计等都会更新为该团队的信息
-            </p>
-          </div>
-        )}
+        {/* 单团队模式：不再显示多团队列表，用户只能属于一个团队 */}
 
         <div className="mt-8 border-t border-dark-border pt-8">
           <h3 className="text-lg font-semibold text-white mb-4 flex items-center space-x-2"><PlusCircle className="w-5 h-5 text-primary" /><span>其他操作</span></h3>

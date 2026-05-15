@@ -193,8 +193,12 @@ export const teamsApi = {
   acceptInvite: () => request<any>('/teams/accept-invite', { method: 'POST' }),
   declineInvite: () => request<any>('/teams/decline-invite', { method: 'POST' }),
   pendingInvitation: () => request<{ has_pending: boolean; team_id?: number; team_name?: string }>('/teams/pending-invitation'),
-  myTeams: () => request<{ items: { team_id: number; team_name: string; role: string; role_label: string; is_active: boolean; status: string; status_label: string; scan_count: number; vuln_count: number; asset_count: number }[] }>('/teams/my-teams'),
-  switchTeam: (teamId: number) => request<any>('/teams/switch', { method: 'POST', body: JSON.stringify({ team_id: teamId }) }),
+  
+  // [单团队模式] 已移除以下多团队接口：
+  // - myTeams(): 获取所有团队列表（不再支持）
+  // - switchTeam(): 切换团队（不再支持）
+  // 替代方案：使用 getMyTeam() 获取当前唯一团队信息
+  
   adminDashboard: () => request<{ teams: any[]; users_without_team: any[] }>('/admin/teams-dashboard'),
   create: (name: string) =>
     request<any>('/teams/create', { method: 'POST', body: JSON.stringify({ name }) }),
