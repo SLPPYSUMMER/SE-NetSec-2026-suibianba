@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { reportApi, teamsApi, SEVERITY_MAP, STATUS_MAP, reportsApi } from '@/services/api';
+import { reportApi, SEVERITY_MAP, STATUS_MAP, reportsApi } from '@/services/api';
 import { Search, Download, Plus, Eye, ChevronLeft, ChevronRight, Loader2, User, Building, Layers, Trash2 } from 'lucide-react';
 
 export default function VulnerabilitiesPage() {
@@ -46,23 +46,7 @@ export default function VulnerabilitiesPage() {
 
   useEffect(() => { fetchReports(); }, [page, severityFilter, statusFilter, sortBy, sortOrder]);
 
-  // [单团队模式] 加载用户的当前团队信息
-  useEffect(() => {
-    const loadTeam = async () => {
-      try {
-        const data = await teamsApi.getMyTeam();
-        if (data.has_team && data.team) {
-          setUserTeams([data.team]);
-        } else {
-          setUserTeams([]);
-        }
-      } catch (err) {
-        console.error('加载团队信息失败:', err);
-        setUserTeams([]);
-      }
-    };
-    loadTeam();
-  }, []);
+  // 监听团队切换，自动重置数据源过滤状态
 
   const sev = (s: string) => SEVERITY_MAP[s] || { label: s, color: 'text-gray-400', bg: 'bg-gray-500' };
   const sta = (s: string) => STATUS_MAP[s] || { label: s, color: 'text-gray-400' };
