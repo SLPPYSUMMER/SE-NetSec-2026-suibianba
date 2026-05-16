@@ -13,6 +13,7 @@ SecGuard API - 基于 Django Ninja 的漏洞管理平台接口
 """
 
 import json
+import html as html_mod
 
 from ninja import Router
 from ninja.errors import HttpError
@@ -2103,8 +2104,8 @@ def import_scan_results(request: HttpRequest):
 
 class ExportSchema(BaseModel):
     format: str = Field("pdf", description="导出格式: pdf/html")
-    project_id: Optional[int] = Field(None, description="项目筛选")
     status: Optional[str] = Field(None, description="状态筛选")
+    severity: Optional[str] = Field(None, description="严重程度筛选: critical/high/medium/low")
     date_from: Optional[str] = Field(None, description="开始日期 (YYYY-MM-DD)")
     date_to: Optional[str] = Field(None, description="结束日期 (YYYY-MM-DD)")
 
@@ -2116,10 +2117,10 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
 
     queryset = Report.objects.all()
     queryset = filter_by_team(queryset, request)
-    if payload.project_id:
-        queryset = queryset.filter(project_id=payload.project_id)
     if payload.status:
         queryset = queryset.filter(status=payload.status)
+    if payload.severity:
+        queryset = queryset.filter(severity=payload.severity)
     if payload.date_from:
         queryset = queryset.filter(created_at__gte=payload.date_from)
     if payload.date_to:
@@ -2135,44 +2136,202 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
     closed = queryset.filter(status=Report.Status.CLOSED).count()
     fix_rate = f"{(fixed + closed) / total * 100:.1f}%" if total > 0 else "0%"
 
+    # ===== 处理时长统计 =====
+    from datetime import timedelta
+    now = timezone.now()
+    avg_days_str = "--"
+    longest_pending_str = "--"
+    stale_count = 0
+    stale_pending = 0
+    stale_processing = 0
+
+    # 已完成漏洞平均处理天数
+    done_qs = queryset.filter(status__in=[Report.Status.FIXED, Report.Status.CLOSED])
+    if done_qs.exists():
+        total_days = sum(
+            ((now - r.created_at).total_seconds() / 86400) for r in done_qs
+        )
+        avg_days_str = f"{total_days / done_qs.count():.1f}天"
+
+    # 最长未处理
+    oldest = queryset.filter(status__in=[Report.Status.PENDING, Report.Status.PROCESSING]).order_by('created_at').first()
+    if oldest:
+        days = (now - oldest.created_at).days
+        longest_pending_str = f"{days}天 ({oldest.vuln_id})"
+
+    # 超期未关 — 待分派超 3 天 / 处理中超 7 天
+    stale_pending = queryset.filter(
+        status=Report.Status.PENDING,
+        created_at__lt=now - timedelta(days=3)
+    ).count()
+    stale_processing = queryset.filter(
+        status=Report.Status.PROCESSING,
+        created_at__lt=now - timedelta(days=7)
+    ).count()
+    stale_count = stale_pending + stale_processing
+
+    # ===== 按严重度修复率 =====
+    sev_fix_rates = {}
+    for sev in ['critical', 'high', 'medium', 'low']:
+        sev_total = queryset.filter(severity=sev).count()
+        if sev_total > 0:
+            sev_fixed = queryset.filter(severity=sev, status__in=[Report.Status.FIXED, Report.Status.CLOSED]).count()
+            sev_fix_rates[sev] = {"total": sev_total, "fixed": sev_fixed, "rate": f"{sev_fixed / sev_total * 100:.1f}%"}
+        else:
+            sev_fix_rates[sev] = {"total": 0, "fixed": 0, "rate": "--"}
+
+    # ===== 分析段数据 =====
+    high_critical_count = queryset.filter(severity__in=['critical', 'high']).count()
+    high_critical_pct = f"{high_critical_count / total * 100:.1f}%" if total > 0 else "0%"
+    top_reporter = None
+    if total > 0:
+        top_reporter = queryset.values('reporter__username').annotate(c=Count('vuln_id')).order_by('-c').first()
+    crit_fix_rate = sev_fix_rates.get('critical', {}).get('rate', '--')
+    # 漏洞密度（条/天）
+    if total > 0 and queryset.exists():
+        first_date = queryset.order_by('created_at').first().created_at
+        date_span = max((now - first_date).days, 1)
+        vuln_density = f"{total / date_span:.1f}"
+    else:
+        vuln_density = "0"
+
     sev_map = {"critical": "严重", "high": "高危", "medium": "中危", "low": "低危"}
     sta_map = {"pending": "待分派", "processing": "处理中", "fixed": "已修复", "reviewing": "已复核", "closed": "已关闭"}
 
+    # CSS 柱状图数据
+    bar_max = max((queryset.filter(severity=s).count() for s in ['critical','high','medium','low']), default=1) or 1
+    sev_colors = {"critical": "#ef4444", "high": "#f97316", "medium": "#eab308", "low": "#22c55e"}
+    sev_bars = ""
+    for sev in ['critical', 'high', 'medium', 'low']:
+        cnt = queryset.filter(severity=sev).count()
+        pct = cnt / bar_max * 100 if bar_max > 0 else 0
+        sev_bars += f"""<tr>
+            <td style="width:80px;text-align:right;padding-right:12px;font-size:13px;">{sev_map.get(sev, sev)}</td>
+            <td style="width:100%;padding:4px 0;"><div style="background:{sev_colors[sev]};height:18px;width:{pct:.0f}%;min-width:2px;border-radius:4px;"></div></td>
+            <td style="width:40px;padding-left:8px;font-weight:bold;font-size:14px;">{cnt}</td>
+        </tr>"""
+
+    # 按严重度修复率表
+    sev_fix_rows = ""
+    for sev in ['critical', 'high', 'medium', 'low']:
+        d = sev_fix_rates[sev]
+        sev_fix_rows += f"""<tr><td>{sev_map.get(sev, sev)}</td><td>{d['total']}</td><td>{d['fixed']}</td><td>{d['rate']}</td></tr>"""
+
+    # 分析段
+    top_reporter_name = html_mod.escape(top_reporter['reporter__username']) if top_reporter else ''
+    top_reporter_count = top_reporter['c'] if top_reporter else 0
+
+    # 超期明细文字
+    stale_detail = ""
+    if stale_pending > 0 and stale_processing > 0:
+        stale_detail = f"，其中待分派超3天 <b>{stale_pending}个</b>、处理中超7天 <b>{stale_processing}个</b>"
+    elif stale_pending > 0:
+        stale_detail = f"，均为待分派超3天"
+    elif stale_processing > 0:
+        stale_detail = f"，均为处理中超7天"
+
+    analysis_html = f"""
+    <div class="analysis">
+      <h2>数据分析与建议</h2>
+      <div class="insight">
+        <h3>总体概况</h3>
+        <p>本次报告共包含 <b>{total}个</b> 漏洞，漏洞密度约 <b>{vuln_density}条/天</b>。整体修复率为 <b>{fix_rate}</b>。高危及以上漏洞 <b>{high_critical_count}个</b>，占总数 {high_critical_pct}，建议优先关注。</p>
+      </div>
+      <div class="insight">
+        <h3>处理效率</h3>
+        <p>已修复漏洞平均处理周期 <b>{avg_days_str}</b>。最长未处理时长为 <b>{longest_pending_str}</b>。超期未关共 <b>{stale_count}个</b>{stale_detail}，建议排期跟进。<br>
+        <small style="color:#94a3b8;">※ 超期定义：待分派超3天未指派 / 处理中超7天未修复</small></p>
+      </div>
+      <div class="insight">
+        <h3>重点关注</h3>
+        <p>"""
+    if sev_fix_rates.get('critical', {}).get('total', 0) > 0 and crit_fix_rate not in ('--', '100.0%'):
+        analysis_html += f'<b>极危漏洞</b>修复率仅{crit_fix_rate}，低于整体水平，需立即处理。<br>'
+    if top_reporter:
+        analysis_html += f'安全测试员 <b>{top_reporter_name}</b> 上报漏洞数量最多（{top_reporter_count}个），建议保持关注。'
+    if total > 0 and high_critical_count / total >= 0.3:
+        analysis_html += f'<br>高危及以上漏洞占比超过 <b>30%</b>，整体安全态势需要引起重视。'
+    analysis_html += """</p>
+      </div>
+      <p class="disclaimer">* 以上分析由 SecGuard 基于导出数据自动生成，规则引擎驱动。</p>
+    </div>"""
+
+    # 报告时间范围
+    report_period = "全部"
+    if payload.date_from and payload.date_to:
+        report_period = f"{payload.date_from} ~ {payload.date_to}"
+    elif payload.date_from:
+        report_period = f"{payload.date_from} 至今"
+    elif payload.date_to:
+        report_period = f"起始 ~ {payload.date_to}"
+
     rows = ""
     for r in reports:
+        title_esc = html_mod.escape(r.title)
+        reporter_esc = html_mod.escape(r.reporter.username) if r.reporter else ''
+        assignee_esc = html_mod.escape(r.assignee.username) if r.assignee else ''
         rows += f"""<tr>
-            <td>{r.vuln_id}</td><td>{r.title}</td><td>{sev_map.get(r.severity, r.severity)}</td>
-            <td>{sta_map.get(r.status, r.status)}</td><td>{r.reporter.username if r.reporter else ''}</td>
-            <td>{r.assignee.username if r.assignee else ''}</td><td>{r.created_at.strftime('%Y-%m-%d')}</td>
+            <td>{html_mod.escape(r.vuln_id)}</td><td>{title_esc}</td><td>{sev_map.get(r.severity, r.severity)}</td>
+            <td>{sta_map.get(r.status, r.status)}</td><td>{reporter_esc}</td>
+            <td>{assignee_esc}</td><td>{r.created_at.strftime('%Y-%m-%d')}</td>
         </tr>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="zh">
 <head><meta charset="UTF-8"><title>SecGuard 安全审计报告</title>
 <style>
-    body{{font-family:'Microsoft YaHei',sans-serif;max-width:960px;margin:40px auto;color:#1a1a2e;}}
-    h1{{color:#0ea5e9;border-bottom:2px solid #0ea5e9;padding-bottom:10px;}}
-    .summary{{display:flex;gap:16px;flex-wrap:wrap;margin:20px 0;}}
-    .card{{border-left:4px solid #0ea5e9;background:#f0f9ff;padding:12px 20px;border-radius:8px;flex:1;min-width:120px;}}
-    .card .num{{font-size:32px;font-weight:bold;}}
-    table{{width:100%;border-collapse:collapse;margin-top:20px;}}
-    th,td{{border:1px solid #e2e8f0;padding:10px;text-align:left;font-size:14px;}}
-    th{{background:#0ea5e9;color:#fff;}}
-    tr:nth-child(even){{background:#f8fafc;}}
+    body{{font-family:'WenQuanYi Micro Hei','Microsoft YaHei','Noto Sans CJK SC',sans-serif;max-width:960px;margin:40px auto;color:#1a1a2e;font-size:14px;}}
+    h1{{color:#0ea5e9;border-bottom:2px solid #0ea5e9;padding-bottom:10px;font-size:24px;}}
+    h2{{color:#334155;font-size:18px;margin-top:30px;border-left:4px solid #0ea5e9;padding-left:12px;}}
+    .meta{{color:#64748b;font-size:13px;margin-bottom:20px;}}
+    .summary{{overflow:hidden;margin:20px 0;}}
+    .card{{float:left;width:18%;margin-right:2%;border-left:4px solid #0ea5e9;background:#f0f9ff;padding:10px 16px;border-radius:8px;box-sizing:border-box;min-height:80px;}}
+    .card .num{{font-size:28px;font-weight:bold;color:#0f172a;}}
+    .card .lbl{{font-size:12px;color:#64748b;}}
+    .severity-table,.fix-table,.detail-table{{width:100%;border-collapse:collapse;margin-top:16px;}}
+    .detail-table th,.detail-table td{{border:1px solid #e2e8f0;padding:8px 10px;text-align:left;font-size:13px;}}
+    .detail-table th{{background:#0ea5e9;color:#fff;font-weight:600;}}
+    .detail-table tr:nth-child(even){{background:#f8fafc;}}
+    .bar-chart td{{padding:2px 0;}}
+    .insight{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin:12px 0;}}
+    .insight h3{{margin:0 0 6px 0;font-size:14px;color:#64748b;}}
+    .insight p{{margin:0;line-height:1.7;font-size:13px;}}
+    .disclaimer{{font-size:11px;color:#94a3b8;margin-top:8px;}}
     .footer{{margin-top:40px;font-size:12px;color:#94a3b8;text-align:center;}}
 </style></head>
 <body>
-<h1>🔒 SecGuard 安全漏洞审计报告</h1>
-<p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 格式: {payload.format.upper()}</p>
+<h1>SecGuard 安全漏洞审计报告</h1>
+<p class="meta">生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 时间范围: {report_period} | 格式: {payload.format.upper()}</p>
+
 <div class="summary">
-    <div class="card"><div>漏洞总数</div><div class="num">{total}</div></div>
-    <div class="card"><div>待处理</div><div class="num">{pending}</div></div>
-    <div class="card"><div>处理中</div><div class="num">{processing}</div></div>
-    <div class="card"><div>已修复</div><div class="num">{fixed}</div></div>
-    <div class="card"><div>修复率</div><div class="num">{fix_rate}</div></div>
+    <div class="card"><div class="num">{total}</div><div class="lbl">漏洞总数</div></div>
+    <div class="card"><div class="num">{pending}</div><div class="lbl">待分派</div></div>
+    <div class="card"><div class="num">{processing}</div><div class="lbl">处理中</div></div>
+    <div class="card"><div class="num">{fixed}</div><div class="lbl">已修复</div></div>
+    <div class="card"><div class="num">{fix_rate}</div><div class="lbl">修复率</div></div>
 </div>
-<table><thead><tr><th>编号</th><th>标题</th><th>严重程度</th><th>状态</th><th>报告人</th><th>处理人</th><th>日期</th></tr></thead>
+
+<h2>处理效率</h2>
+<table class="fix-table">
+  <tr><th>指标</th><th>数值</th><th>说明</th></tr>
+  <tr><td>平均处理周期</td><td style="font-weight:bold;">{avg_days_str}</td><td>已修复/已关闭漏洞从创建到关闭的平均天数</td></tr>
+  <tr><td>最长未处理</td><td style="font-weight:bold;">{longest_pending_str}</td><td>待分派/处理中状态中创建时间最早的漏洞</td></tr>
+  <tr><td>超期未关</td><td style="font-weight:bold;color:#ef4444;">{stale_count}个</td><td>待分派超3天: {stale_pending}个 | 处理中超7天: {stale_processing}个</td></tr>
+  <tr><td>漏洞密度</td><td style="font-weight:bold;">{vuln_density}条/天</td><td>报告周期内日均新增漏洞数</td></tr>
+</table>
+
+<h2>严重度分布</h2>
+<table class="bar-chart">{sev_bars}</table>
+
+<h2>按严重度修复率</h2>
+<table class="fix-table"><tr><th>严重度</th><th>总数</th><th>已修复/关闭</th><th>修复率</th></tr>{sev_fix_rows}</table>
+
+{analysis_html}
+
+<h2>漏洞明细</h2>
+<table class="detail-table"><thead><tr><th>编号</th><th>标题</th><th>严重程度</th><th>状态</th><th>报告人</th><th>处理人</th><th>日期</th></tr></thead>
 <tbody>{rows}</tbody></table>
+
 <p class="footer">SecGuard Sentinel — 漏洞管理与跟踪平台 | 数据基于团队权限导出</p>
 </body></html>"""
 
@@ -2202,7 +2361,19 @@ def export_reports(request: HttpRequest, payload: ExportSchema):
             })
         return {
             "format": payload.format, "generated_at": datetime.now().isoformat(),
-            "summary": {"total": total, "pending": pending, "processing": processing, "fixed": fixed, "reviewing": reviewing, "closed": closed, "fix_rate": fix_rate},
+            "summary": {
+                "total": total, "pending": pending, "processing": processing,
+                "fixed": fixed, "reviewing": reviewing, "closed": closed,
+                "fix_rate": fix_rate,
+                "avg_processing_days": avg_days_str,
+                "longest_pending": longest_pending_str,
+                "stale_count": stale_count,
+                "stale_pending": stale_pending,
+                "stale_processing": stale_processing,
+                "vuln_density": vuln_density,
+                "high_critical_pct": high_critical_pct,
+                "severity_fix_rates": sev_fix_rates,
+            },
             "items": items,
         }
 
