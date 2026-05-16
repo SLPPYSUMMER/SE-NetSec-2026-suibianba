@@ -242,7 +242,7 @@ export default function VulnerabilitiesPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`text-sm font-medium ${sta(r.status).color}`}>
-                        {r.data_source === 'personal' && r.status === 'pending' 
+                        {r.data_source === 'personal' && !r.team_id && r.status === 'pending'
                           ? <span className="flex items-center space-x-1"><span>处理中</span><span className="text-xs text-gray-500">(个人)</span></span>
                           : sta(r.status).label
                         }
@@ -259,7 +259,7 @@ export default function VulnerabilitiesPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-gray-300">
-                        {r.assignee_username || (r.data_source === 'personal' ? r.reporter_username + ' (自动)' : '未分派')}
+                        {r.assignee_username || (r.data_source === 'personal' && !r.team_id ? r.reporter_username + ' (自动)' : '未分派')}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">

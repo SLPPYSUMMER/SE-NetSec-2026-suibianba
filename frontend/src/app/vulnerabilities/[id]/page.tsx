@@ -42,7 +42,7 @@ export default function VulnerabilityDetailPage() {
   const canAssign = isStaff || isTeamAdmin || isSecurityLead;
   const canFix = isStaff || (isAssignee && !isObserver) || (isDeveloper && isAssignee);
   const canReview = isStaff || isTeamAdmin || isSecurityLead || isReporter;
-  const isPersonalReport = !report?.team_id || report?.data_source === 'personal';
+  const isPersonalReport = report?.data_source === 'personal' && !report?.team_id;
   const canClose = isStaff || isTeamAdmin || isSecurityLead || (isPersonalReport && isReporter);
   
   // 个人漏洞：报告者视为处理人
