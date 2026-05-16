@@ -80,8 +80,10 @@ services:
 
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/blt_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=blt_db
       - POSTGRES_PASSWORD=postgres
-      - DEBUG=False
+      - DEBUG=True
     # [DEV] 开发模式：动态安装依赖 + 启动开发服务器
     command: >
       bash -c "pip install --quiet -r /blt/requirements.txt

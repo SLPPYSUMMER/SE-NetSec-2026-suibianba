@@ -8,6 +8,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  raw_role: string;
   is_staff: boolean;
   team_id: number | null;
   team_name: string | null;
@@ -46,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     name: data.username,
     email: data.email || '',
     role: roleLabel(data.role, data.is_staff),
+    raw_role: data.role || '',
     is_staff: data.is_staff,
     team_id: data.team_id || null,
     team_name: data.team_name || null,

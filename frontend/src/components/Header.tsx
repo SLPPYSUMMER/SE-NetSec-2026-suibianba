@@ -172,7 +172,7 @@ export default function Header({ title }: HeaderProps) {
           <div className="flex items-center space-x-3 pl-4 border-l border-dark-border">
             <div className="text-right">
               <p className="text-sm font-medium text-white">{user?.name || 'Admin_Chen'}</p>
-              <p className="text-xs text-gray-500">{user?.role || '高级安全分析师'}</p>
+              {user?.is_staff && <p className="text-xs text-gray-500">{user?.role}</p>}
             </div>
             <div className="w-10 h-10 bg-gradient-to-br from-primary to-cyan-600 rounded-full flex items-center justify-center">
               <User className="w-5 h-5 text-white" />

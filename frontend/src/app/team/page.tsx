@@ -5,7 +5,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { teamsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Users, UserPlus, Check, X, Mail, Shield, Loader2, AlertCircle, Trash2, Search, Building, AlertTriangle, LogOut, PlusCircle } from 'lucide-react';
+import { Users, UserPlus, Check, X, Mail, Loader2, AlertCircle, Trash2, Search, Building, AlertTriangle, LogOut } from 'lucide-react';
 
 const ROLE_OPTIONS = [
   { value: 'team_lead', label: '安全负责人' },
@@ -33,7 +33,7 @@ export default function TeamPage() {
   const [pendingInviteInfo, setPendingInviteInfo] = useState<any>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const isAdmin = user?.role === '团队管理员' || user?.is_staff;
+  const isAdmin = user?.raw_role === 'admin' || user?.is_staff;
   const hasTeam = !!(user?.team_id);
 
   useEffect(() => {
@@ -110,7 +110,11 @@ export default function TeamPage() {
   };
 
   const handleDissolve = async () => {
-    if (!confirm('⚠️ 确定要解散团队吗？此操作不可恢复！团队将被永久删除。')) return;
+    if (members.length > 1) {
+      if (!confirm(`⚠️ 团队中还有 ${members.length - 1} 名其他成员。解散团队后，所有成员将被移出团队，团队数据将被永久删除。此操作不可恢复！确定要解散团队吗？`)) return;
+    } else {
+      if (!confirm('⚠️ 确定要解散团队吗？此操作不可恢复！团队将被永久删除。')) return;
+    }
     if (!confirm('再次确认：确定要解散团队吗？')) return;
     setActionLoading(true);
     try {
@@ -292,10 +296,10 @@ export default function TeamPage() {
             )}
           </div>
           <div className="flex items-center space-x-3">
-            {isAdmin && members.length <= 1 && (
+            {isAdmin && (
               <button onClick={handleDissolve} disabled={actionLoading}
                 className="px-5 py-2.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded-lg hover:bg-red-600/30 font-medium text-sm flex items-center space-x-2 transition-all">
-                <AlertTriangle className="w-4 h-4" /><span>解散团队</span>
+                <Trash2 className="w-4 h-4" /><span>解散团队</span>
               </button>
             )}
             {!isAdmin && (
@@ -370,33 +374,6 @@ export default function TeamPage() {
         )}
 
         {/* 单团队模式：不再显示多团队列表，用户只能属于一个团队 */}
-
-        <div className="mt-8 border-t border-dark-border pt-8">
-          <h3 className="text-lg font-semibold text-white mb-4 flex items-center space-x-2"><PlusCircle className="w-5 h-5 text-primary" /><span>其他操作</span></h3>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-dark-card border border-dark-border rounded-xl p-6">
-              <div className="flex items-center space-x-2 mb-4"><Building className="w-5 h-5 text-primary" /><h3 className="text-lg font-semibold text-white">创建新团队</h3></div>
-              <input type="text" value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="输入新团队名称"
-                className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary mb-3" />
-              <button onClick={handleCreateTeam} disabled={!teamName.trim() || actionLoading}
-                className="w-full px-4 py-3 bg-gradient-to-r from-primary to-cyan-400 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all disabled:opacity-50 flex items-center justify-center space-x-2">
-                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building className="w-4 h-4" />}<span>创建新团队</span>
-              </button>
-              <p className="text-xs text-gray-500 mt-3">创建后将自动成为该团队的管理员</p>
-            </div>
-
-            <div className="bg-dark-card border border-dark-border rounded-xl p-6">
-              <div className="flex items-center space-x-2 mb-4"><Search className="w-5 h-5 text-primary" /><h3 className="text-lg font-semibold text-white">加入其他团队</h3></div>
-              <input type="text" value={joinTeamId} onChange={(e) => setJoinTeamId(e.target.value)} placeholder="输入要加入的团队ID"
-                className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary mb-3" />
-              <button onClick={handleJoinTeam} disabled={!joinTeamId.trim() || actionLoading}
-                className="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-500 text-white font-medium rounded-lg hover:shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50 flex items-center justify-center space-x-2">
-                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}<span>申请加入</span>
-              </button>
-              <p className="text-xs text-gray-500 mt-3">需要等待目标团队管理员审核通过</p>
-            </div>
-          </div>
-        </div>
       </main>
     </div></div>
   );

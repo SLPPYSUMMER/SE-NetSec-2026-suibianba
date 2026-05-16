@@ -205,7 +205,7 @@ export const teamsApi = {
   join: (teamId: number) =>
     request<any>('/teams/join', { method: 'POST', body: JSON.stringify({ team_id: teamId }) }),
   leave: () =>
-    request<any>('/teams/leave', { method: 'POST' }),
+    request<any>('/teams/leave', { method: 'POST', body: JSON.stringify({ confirm: true }) }),
   dissolve: () =>
     request<any>('/teams/dissolve', { method: 'POST' }),
   getMyTeam: () =>

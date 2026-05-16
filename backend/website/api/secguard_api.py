@@ -40,7 +40,8 @@ from website.models import (
     Notification,
     Attachment,
     Issue,  # 复用原有 Issue 模型进行关联查询
-    Asset   # 资产模型，用于统计团队资产数量
+    Asset,   # 资产模型，用于统计团队资产数量
+    UserProfile,  # 用户档案模型
 )
 from website.models import Organization
 
@@ -3091,6 +3092,7 @@ def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSch
         m.save()
         create_audit_log(user=request.user, action='TEAM_APPROVED', target_type='Team',
                          target_id=str(team.id), detail=f"通过了 {m.user.username} 的加入申请", request=request)
+        create_notification(m.user, f"您的加入团队 '{team.name}' 申请已通过，角色：{m.get_role_display()}", "general", "/team")
         return {"success": True, "message": f"已通过 {m.user.username} 的加入申请"}
 
     elif payload.action == "reject":
@@ -3100,6 +3102,7 @@ def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSch
         m.save()
         create_audit_log(user=request.user, action='TEAM_REJECTED', target_type='Team',
                          target_id=str(team.id), detail=f"拒绝了 {m.user.username} 的加入申请", request=request)
+        create_notification(m.user, f"您的加入团队 '{team.name}' 申请已被拒绝", "alert", "/team")
         return {"success": True, "message": f"已拒绝 {m.user.username} 的加入申请"}
 
     elif payload.action == "change_role":
@@ -3112,6 +3115,7 @@ def handle_member(request: HttpRequest, member_id: int, payload: HandleMemberSch
         profile.role = payload.role
         profile.save()
         m.save()
+        create_notification(m.user, f"您在团队 '{team.name}' 中的角色已更改为：{m.get_role_display()}", "general", "/team")
         return {"success": True, "message": f"已将 {m.user.username} 的角色更改为 {m.get_role_display()}"}
 
     raise HttpError(400, "无效的操作，请使用 approve / reject / change_role")
@@ -3132,6 +3136,7 @@ def invite_member(request: HttpRequest, payload: InviteSchema):
         role=TeamMembership.Role.DEVELOPER,
         status=TeamMembership.Status.PENDING,
     )
+    create_notification(invited, f"您收到来自团队 '{team.name}' 的加入邀请，请前往团队页面查看", "general", "/team")
     return {"success": True, "message": f"已邀请 {invited.username}，等待对方确认加入"}
 
 
@@ -3148,6 +3153,7 @@ def kick_member(request: HttpRequest, member_id: int):
     if m.role == "admin":
         raise HttpError(400, "不能踢出团队管理员")
     username = m.user.username
+    create_notification(m.user, f"您已被移出团队 '{team.name}'", "alert", "/team")
     m.delete()
     create_audit_log(user=request.user, action='TEAM_KICKED', target_type='Team',
                      target_id=str(team.id), detail=f"将 {username} 移出团队", request=request)
@@ -3264,31 +3270,6 @@ def my_teams(request: HttpRequest):
     return {"items": result}
 
 
-@router.post("/teams/leave")
-def leave_team(request: HttpRequest):
-    """退出当前团队"""
-    if not request.user.is_authenticated:
-        raise HttpError(400, "请先登录")
-    
-    team, membership = require_team(request)
-    
-    if membership.role == TeamMembership.Role.ADMIN:
-        raise HttpError(400, "团队管理员不能直接退出，请先解散团队或转让管理员权限")
-    
-    team_name = team.name
-    membership.delete()
-    
-    profile = request.user.userprofile
-    profile.team = None
-    profile.role = None
-    profile.save()
-    
-    create_audit_log(user=request.user, action='TEAM_LEFT', target_type='Team',
-                     target_id=str(team.id), detail=f"退出了团队 {team_name}", request=request)
-    
-    return {"success": True, "message": f"已成功退出团队 {team_name}"}
-
-
 @router.post("/teams/dissolve")
 def dissolve_team(request: HttpRequest):
     """解散团队（仅团队管理员）"""
@@ -3298,9 +3279,6 @@ def dissolve_team(request: HttpRequest):
     team, membership = require_team_role(request, ["admin"])
     
     member_count = TeamMembership.objects.filter(team=team, status=TeamMembership.Status.ACCEPTED).count()
-    
-    if member_count > 1:
-        raise HttpError(400, f"团队中还有 {member_count - 1} 名其他成员，不能解散。请先将成员移出或转让管理员权限")
     
     team_name = team.name
     
@@ -3316,7 +3294,7 @@ def dissolve_team(request: HttpRequest):
     create_audit_log(user=request.user, action='TEAM_DISSOLVED', target_type='Team',
                      target_id=str(team.id), detail=f"解散了团队 {team_name}", request=request)
     
-    return {"success": True, "message": f"团队 {team_name} 已成功解散"}
+    return {"success": True, "message": f"团队 {team_name} 已成功解散", "dissolved_member_count": member_count}
 
 
 @router.get("/teams/pending-invitation")

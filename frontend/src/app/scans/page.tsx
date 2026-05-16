@@ -42,10 +42,8 @@ export default function ScansPage() {
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);  // 后台刷新状态（不显示loading）
   const [dataSource, setDataSource] = useState<'all' | 'personal' | 'team'>('all');
-  const [userTeams, setUserTeams] = useState<any[]>([]);  // [单团队模式]
   // 创建任务时的身份选择
   const [createDataSource, setCreateDataSource] = useState<'personal' | 'team'>('team');  // 创建时的身份：个人/团队
-  const [createTeamId, setCreateTeamId] = useState<number | null>(null);  // 创建时选择的团队ID
   const perPage = 20;
 
   const fetchScans = async (showLoading: boolean = true) => {
@@ -70,29 +68,14 @@ export default function ScansPage() {
   useEffect(() => {
     const loadTeam = async () => {
       try {
-        console.log('🔍 [DEBUG] 开始加载团队信息（单团队模式）...');
         const data = await teamsApi.getMyTeam();
-        console.log('✅ [DEBUG] API 返回原始数据:', data);
-
         if (data.has_team && data.team) {
-          const teams = [data.team];  // 单团队模式：只有一个团队
-          setUserTeams(teams);
-          
-          // 设置默认创建身份：使用当前团队
           setCreateDataSource('team');
-          setCreateTeamId(data.team.id);
-          
-          console.log('✅ [DEBUG] 团队信息已加载:', data.team.name);
         } else {
-          setUserTeams([]);
-          // 没有团队，只能选择个人
           setCreateDataSource('personal');
-          setCreateTeamId(null);
-          console.log('⚠️ [DEBUG] 用户未加入任何团队');
         }
       } catch (err) {
         console.error('加载团队信息失败:', err);
-        setUserTeams([]);
       }
     };
     loadTeam();
@@ -169,8 +152,8 @@ export default function ScansPage() {
 
   const handleCreate = async () => {
     if (!targetUrl) return;
-    if (createDataSource === 'team' && !createTeamId) {
-      alert('请选择一个团队');
+    if (createDataSource === 'team' && !user?.team_id) {
+      alert('您尚未加入任何团队，无法以团队身份创建任务');
       return;
     }
     setCreating(true);
@@ -178,12 +161,12 @@ export default function ScansPage() {
       const payload: any = { 
         target: targetUrl, 
         scanner_type: scanType,
-        timeout_minutes: timeoutMinutes,  // 使用用户设置的超时时间
-        data_source: createDataSource,   // 添加数据来源
+        timeout_minutes: timeoutMinutes,
+        data_source: createDataSource,
       };
-      // 如果选择团队身份，添加团队ID
-      if (createDataSource === 'team' && createTeamId) {
-        payload.team_id = createTeamId;
+      // 单团队模式：自动使用当前用户的团队
+      if (createDataSource === 'team' && user?.team_id) {
+        payload.team_id = user.team_id;
       }
       if (scanType === 'custom') {
         payload.selected_modules = Array.from(selectedModules).join(',');
@@ -401,7 +384,7 @@ export default function ScansPage() {
                 <div className="flex space-x-2">
                   <button
                     type="button"
-                    onClick={() => { setCreateDataSource('personal'); setCreateTeamId(null); }}
+                    onClick={() => setCreateDataSource('personal')}
                     className={`flex-1 px-4 py-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center space-x-2 ${
                       createDataSource === 'personal'
                         ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
@@ -422,27 +405,6 @@ export default function ScansPage() {
                     <span>团队</span>
                   </button>
                 </div>
-                
-                {/* 团队选择下拉框 */}
-                {createDataSource === 'team' && (
-                  <div className="mt-2">
-                    <select 
-                      value={createTeamId || ''} 
-                      onChange={(e) => setCreateTeamId(parseInt(e.target.value) || null)}
-                      className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer"
-                    >
-                      <option value="">-- 选择团队 --</option>
-                      {userTeams.map((team: any) => (
-                        <option key={team.id} value={team.id}>
-                          {team.name}
-                        </option>
-                      ))}
-                    </select>
-                    {!createTeamId && (
-                      <p className="mt-1 text-xs text-yellow-500">请选择一个团队</p>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
             <div className="mt-4">
