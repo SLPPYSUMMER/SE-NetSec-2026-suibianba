@@ -15,6 +15,16 @@ export default function ReportVulnerabilityPage() {
   const [duplicateWarn, setDuplicateWarn] = useState('');
   const [members, setMembers] = useState<any[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  
+  const { user } = useAuth();
+  const isStaff = user?.is_staff;
+  const canAssignAnyone = isStaff || user?.role === '管理员' || user?.role === '项目经理';
+  const hasTeam = !!(user?.team_id);
+  
+  // 如果用户没有团队，默认为个人漏洞并自动设置处理人
+  const defaultPersonal = !hasTeam;
+  const defaultAssigneeId = !hasTeam && user ? user.id : 0;
+
   const [formData, setFormData] = useState({
     title: '',
     severity: 'high',
@@ -24,14 +34,9 @@ export default function ReportVulnerabilityPage() {
     impact_scope: '',
     cve_id: '',
     project_id: 1,
-    assignee_id: 0,
-    personal: false,
+    assignee_id: defaultAssigneeId,
+    personal: defaultPersonal,
   });
-
-  const { user } = useAuth();
-  const isStaff = user?.is_staff;
-  const canAssignAnyone = isStaff || user?.role === '管理员' || user?.role === '项目经理';
-  const hasTeam = !!(user?.team_id);
 
   const assignableMembers = (() => {
     if (canAssignAnyone) {
@@ -50,6 +55,13 @@ export default function ReportVulnerabilityPage() {
   useEffect(() => {
     teamsApi.members().then(m => setMembers(m.items || [])).catch(() => {});
   }, []);
+
+  // 个人漏洞时自动设置为当前用户为处理人
+  useEffect(() => {
+    if (formData.personal && user) {
+      update('assignee_id', user.id);
+    }
+  }, [formData.personal, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,15 +155,26 @@ export default function ReportVulnerabilityPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">指派处理人</label>
-                <select value={formData.assignee_id || ''} onChange={(e) => update('assignee_id', parseInt(e.target.value) || 0)}
-                  className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
-                  <option value="">不指派（待分派）</option>
-                  {assignableMembers.map(m => (
-                    <option key={m.user_id} value={m.user_id}>{m.username} ({m.role_label})</option>
-                  ))}
-                </select>
-                {assignableMembers.length === 0 && <p className="text-xs text-gray-500 mt-1">暂无团队成员，不指派将进入待分派状态</p>}
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  {formData.personal ? '处理人（自动指派）' : '指派处理人'}
+                </label>
+                {formData.personal ? (
+                  <div className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-gray-400 flex items-center space-x-2">
+                    <User className="w-4 h-4" />
+                    <span>{user?.name || '自己'} （个人漏洞自动设为处理人）</span>
+                  </div>
+                ) : (
+                  <>
+                    <select value={formData.assignee_id || ''} onChange={(e) => update('assignee_id', parseInt(e.target.value) || 0)}
+                      className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:border-primary cursor-pointer">
+                      <option value="">不指派（待分派）</option>
+                      {assignableMembers.map(m => (
+                        <option key={m.user_id} value={m.user_id}>{m.username} ({m.role_label})</option>
+                      ))}
+                    </select>
+                    {assignableMembers.length === 0 && <p className="text-xs text-gray-500 mt-1">暂无团队成员，不指派将进入待分派状态</p>}
+                  </>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">CVE 编号</label>

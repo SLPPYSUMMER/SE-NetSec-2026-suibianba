@@ -236,12 +236,17 @@ export default function VulnerabilitiesPage() {
                       <p className="text-sm font-medium text-white truncate max-w-md">{r.title}</p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium ${sev(r.severity).bg} text-white`}>
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold border ${sev(r.severity).badge} shadow-sm`}>
                         {sev(r.severity).label}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`text-sm font-medium ${sta(r.status).color}`}>{sta(r.status).label}</span>
+                      <span className={`text-sm font-medium ${sta(r.status).color}`}>
+                        {r.data_source === 'personal' && r.status === 'pending' 
+                          ? <span className="flex items-center space-x-1"><span>处理中</span><span className="text-xs text-gray-500">(个人)</span></span>
+                          : sta(r.status).label
+                        }
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
@@ -253,7 +258,9 @@ export default function VulnerabilitiesPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-gray-300">{r.assignee_username || '未分派'}</span>
+                      <span className="text-sm text-gray-300">
+                        {r.assignee_username || (r.data_source === 'personal' ? r.reporter_username + ' (自动)' : '未分派')}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-gray-400">{r.processing_time || '—'}</span>

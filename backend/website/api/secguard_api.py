@@ -173,6 +173,8 @@ class ReportDetailSchema(BaseModel):
     project_name: Optional[str]
     created_at: datetime
     updated_at: datetime
+    data_source: str = "personal"
+    team_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -730,6 +732,10 @@ def create_report(request: HttpRequest, payload: ReportCreateSchema):
             raise HttpError(400, f"被分派的用户ID {payload.assignee_id} 不存在")
 
     if payload.personal and not assignee:
+        assignee = request.user
+
+    # 个人漏洞强制设置处理人为报告者本人，状态为处理中
+    if payload.personal:
         assignee = request.user
 
     duplicate_result = check_report_duplicates(

@@ -42,8 +42,12 @@ export default function VulnerabilityDetailPage() {
   const canAssign = isStaff || isTeamAdmin || isSecurityLead;
   const canFix = isStaff || (isAssignee && !isObserver) || (isDeveloper && isAssignee);
   const canReview = isStaff || isTeamAdmin || isSecurityLead || isReporter;
-  const isPersonalReport = !report?.team_id;
+  const isPersonalReport = !report?.team_id || report?.data_source === 'personal';
   const canClose = isStaff || isTeamAdmin || isSecurityLead || (isPersonalReport && isReporter);
+  
+  // 个人漏洞：报告者视为处理人
+  const effectiveIsAssignee = isPersonalReport ? isReporter : isAssignee;
+  const canFixEffective = isStaff || (effectiveIsAssignee && !isObserver) || (isDeveloper && effectiveIsAssignee);
 
   useEffect(() => {
     const fetch = async () => {
@@ -166,17 +170,24 @@ export default function VulnerabilityDetailPage() {
   const sev = (s: string) => SEVERITY_MAP[s] || { label: s, color: 'text-gray-400', bg: 'bg-gray-500' };
   const sta = (s: string) => STATUS_MAP[s] || { label: s, color: 'text-gray-400' };
 
-  if (loading) return <div className="min-h-screen bg-dark-bg flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>;
-  if (error || !report) return <div className="min-h-screen bg-dark-bg flex items-center justify-center"><p className="text-red-400">{error || '未找到该漏洞'}</p></div>;
-
+  // 个人漏洞：优化状态显示（pending 视为 processing）
+  const effectiveStatus = (isPersonalReport && report?.status === 'pending') ? 'processing' : report?.status;
+  
   const statusSteps = [
-    { label: '漏洞发现', key: 'pending', desc: '待分派给处理人' },
-    { label: '处理中', key: 'processing', desc: '处理人: ' + (report.assignee?.username || '—') },
+    ...(isPersonalReport ? [] : [{ label: '漏洞发现', key: 'pending', desc: '待分派给处理人' }]),
+    { label: '处理中', key: 'processing', desc: isPersonalReport 
+      ? `处理人: ${report?.assignee?.username || report?.reporter?.username || '—'} (自动指派)`
+      : `处理人: ${report?.assignee?.username || '—'}`
+    },
     { label: '已修复', key: 'fixed', desc: '等待复核' },
     { label: '已复核', key: 'reviewing', desc: '复审通过' },
     { label: '已关闭', key: 'closed', desc: '' },
   ];
-  const currentStepIdx = statusSteps.findIndex(s => s.key === report.status);
+
+  if (loading) return <div className="min-h-screen bg-dark-bg flex items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>;
+  if (error || !report) return <div className="min-h-screen bg-dark-bg flex items-center justify-center"><p className="text-red-400">{error || '未找到该漏洞'}</p></div>;
+
+  const currentStepIdx = statusSteps.findIndex(s => s.key === effectiveStatus);
 
   return (
     <div className="min-h-screen bg-dark-bg">
@@ -195,10 +206,10 @@ export default function VulnerabilityDetailPage() {
               <div className="flex-1">
                 <div className="flex items-center space-x-3 mb-3">
                   <span className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-mono">{report.vuln_id}</span>
-                  <span className={`px-3 py-1 ${sev(report.severity).bg}/10 ${sev(report.severity).color} rounded-full text-xs font-bold flex items-center space-x-1`}>
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center space-x-1 ${sev(report.severity).badge} shadow-sm`}>
                     <AlertTriangle className="w-3 h-3" /><span>{sev(report.severity).label}</span>
                   </span>
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${sta(report.status).color} bg-dark-bg`}>{sta(report.status).label}</span>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${sta(effectiveStatus || report.status).color} bg-dark-bg`}>{sta(effectiveStatus || report.status).label}</span>
                 </div>
                 <h1 className="text-3xl font-bold text-white mb-2">{report.title}</h1>
                 {report.cve_id && <p className="text-sm text-gray-500 font-mono">CVE: {report.cve_id}</p>}
@@ -249,19 +260,19 @@ export default function VulnerabilityDetailPage() {
                   </div>
 
                   <div className="mt-6 space-y-2">
-                    {report.status === 'pending' && canAssign && (
+                    {effectiveStatus === 'pending' && canAssign && !isPersonalReport && (
                       <button onClick={() => setShowAssignModal(true)} disabled={!!actionLoading}
                         className="w-full py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary/80 disabled:opacity-50">
                         分派漏洞给处理人
                       </button>
                     )}
-                    {report.status === 'processing' && canFix && (
+                    {effectiveStatus === 'processing' && canFixEffective && (
                       <button onClick={() => handleAction('fix')} disabled={!!actionLoading}
                         className="w-full py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-500 disabled:opacity-50">
                         {actionLoading === 'fix' ? '处理中...' : '提交修复'}
                       </button>
                     )}
-                    {report.status === 'fixed' && canReview && (
+                    {effectiveStatus === 'fixed' && canReview && (
                       <>
                         <button onClick={() => handleAction('review')} disabled={!!actionLoading}
                           className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 disabled:opacity-50">
@@ -273,24 +284,25 @@ export default function VulnerabilityDetailPage() {
                         </button>
                       </>
                     )}
-                    {report.status === 'reviewing' && canClose && (
+                    {effectiveStatus === 'reviewing' && canClose && (
                       <button onClick={() => handleAction('close')} disabled={!!actionLoading}
                         className="w-full py-3 bg-gray-600 text-white font-medium rounded-lg hover:bg-gray-500 disabled:opacity-50">
                         {actionLoading === 'close' ? '处理中...' : '关闭漏洞'}
                       </button>
                     )}
-                    {(report.status === 'closed' || report.status === 'reviewing') && canClose && (
+                    {(effectiveStatus === 'closed' || effectiveStatus === 'reviewing') && canClose && (
                       <button onClick={() => handleAction('reopen')} disabled={!!actionLoading}
                         className="w-full py-3 bg-yellow-600 text-white font-medium rounded-lg hover:bg-yellow-500 disabled:opacity-50">
                         {actionLoading === 'reopen' ? '处理中...' : '重新打开'}
                       </button>
                     )}
-                    {!canManage && report.status === 'pending' && <p className="text-xs text-gray-500 text-center">等待分派</p>}
+                    {!canManage && effectiveStatus === 'pending' && !isPersonalReport && <p className="text-xs text-gray-500 text-center">等待分派</p>}
+                    {isPersonalReport && effectiveStatus === 'pending' && <p className="text-xs text-green-400 text-center">个人漏洞，您可直接进行修复</p>}
                   </div>
 
                   <div className="mt-6 pt-6 border-t border-dark-border space-y-4">
-                    <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">漏洞等级</h4><span className={`text-2xl font-bold ${sev(report.severity).color}`}>{sev(report.severity).label}</span></div>
-                    <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">处理人</h4><p className="text-sm text-gray-300">{report.assignee?.username || '未分派'}</p></div>
+                    <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">漏洞等级</h4><span className={`inline-flex items-center px-4 py-2 rounded-lg text-xl font-bold border ${sev(report.severity).badge} shadow-sm`}>{sev(report.severity).label}</span></div>
+                    <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">处理人</h4><p className="text-sm text-gray-300">{report.assignee?.username || (isPersonalReport ? report.reporter?.username : '未分派')}</p></div>
                     <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">报告人</h4><p className="text-sm text-gray-400">{report.reporter?.username || '未知'}</p></div>
                     {report.affected_url && <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">受影响 URL</h4><p className="text-sm text-primary break-all">{report.affected_url}</p></div>}
                     {report.impact_scope && <div><h4 className="text-xs font-medium text-gray-500 uppercase mb-2">影响范围</h4><p className="text-sm text-gray-300">{report.impact_scope}</p></div>}

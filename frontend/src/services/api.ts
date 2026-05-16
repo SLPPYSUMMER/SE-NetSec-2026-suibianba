@@ -105,11 +105,39 @@ export const auditApi = {
   },
 };
 
-export const SEVERITY_MAP: Record<string, { label: string; color: string; bg: string }> = {
-  critical: { label: '极危', color: 'text-red-500', bg: 'bg-red-500' },
-  high: { label: '高危', color: 'text-orange-500', bg: 'bg-orange-500' },
-  medium: { label: '中危', color: 'text-yellow-500', bg: 'bg-yellow-500' },
-  low: { label: '低危', color: 'text-green-500', bg: 'bg-green-500' },
+export const SEVERITY_MAP: Record<string, { label: string; color: string; bg: string; border: string; shadow: string; badge: string }> = {
+  critical: {
+    label: '极危',
+    color: 'text-red-400',
+    bg: 'bg-red-500',
+    border: 'border-red-500/50',
+    shadow: 'shadow-red-500/20',
+    badge: 'bg-red-500/20 text-red-300 border-red-500/30'
+  },
+  high: {
+    label: '高危',
+    color: 'text-orange-400',
+    bg: 'bg-orange-500',
+    border: 'border-orange-500/50',
+    shadow: 'shadow-orange-500/20',
+    badge: 'bg-orange-500/20 text-orange-300 border-orange-500/30'
+  },
+  medium: {
+    label: '中危',
+    color: 'text-yellow-400',
+    bg: 'bg-yellow-500',
+    border: 'border-yellow-500/50',
+    shadow: 'shadow-yellow-500/20',
+    badge: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30'
+  },
+  low: {
+    label: '低危',
+    color: 'text-green-400',
+    bg: 'bg-green-500',
+    border: 'border-green-500/50',
+    shadow: 'shadow-green-500/20',
+    badge: 'bg-green-500/20 text-green-300 border-green-500/30'
+  },
 };
 
 export const STATUS_MAP: Record<string, { label: string; color: string }> = {
