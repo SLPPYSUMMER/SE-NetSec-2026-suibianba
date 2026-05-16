@@ -10,10 +10,10 @@ import { Users, UserPlus, Check, X, Mail, Loader2, AlertCircle, Trash2, Search, 
 const ROLE_OPTIONS = [
   { value: 'team_lead', label: '安全负责人' },
   { value: 'developer', label: '开发人员' },
-  { value: 'observer', label: '观察者' },
+  { value: 'observer', label: '安全测试员' },
 ];
 const ROLE_LABELS: Record<string, string> = {
-  admin: '团队管理员', team_lead: '安全负责人', developer: '开发人员', observer: '观察者',
+  admin: '团队管理员', team_lead: '安全负责人', developer: '开发人员', observer: '安全测试员',
 };
 
 export default function TeamPage() {
